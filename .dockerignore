@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.env.example
+.tripgo/
+bin/
+*.md
+deploy/
+migrations/
+contracts/
+environment.toml
+oapi-codegen.yaml
+**/*_test.go
