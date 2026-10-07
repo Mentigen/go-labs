@@ -1,10 +1,8 @@
 package httpserver
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -16,8 +14,6 @@ import (
 	"github.com/Mentigen/go-labs/internal/service"
 )
 
-var requiredCreateTripFields = []string{"user_id", "driver_id", "start_point", "end_point", "price"}
-
 func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.CreateTripParams) {
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -25,25 +21,9 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 		return
 	}
 
-	var presence map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &presence); err != nil {
-		writeInvalidRequest(w, r, "invalid JSON body: "+err.Error())
-		return
-	}
-
-	for _, field := range requiredCreateTripFields {
-		if _, ok := presence[field]; !ok {
-			writeInvalidRequest(w, r, fmt.Sprintf("%s is required", field))
-			return
-		}
-	}
-
 	var body api.CreateTripJSONRequestBody
 
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-
-	if err := decoder.Decode(&body); err != nil {
+	if err := json.Unmarshal(raw, &body); err != nil {
 		writeInvalidRequest(w, r, "invalid JSON body: "+err.Error())
 		return
 	}
@@ -55,21 +35,6 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 
 	if body.DriverId == uuid.Nil {
 		writeInvalidRequest(w, r, "driver_id must not be empty")
-		return
-	}
-
-	if !coordinatesValid(body.StartPoint) {
-		writeInvalidRequest(w, r, "start_point contains invalid coordinates")
-		return
-	}
-
-	if !coordinatesValid(body.EndPoint) {
-		writeInvalidRequest(w, r, "end_point contains invalid coordinates")
-		return
-	}
-
-	if body.Price < 0 {
-		writeInvalidRequest(w, r, "price must not be negative")
 		return
 	}
 
@@ -143,9 +108,4 @@ func (h *Handler) CreateTrip(w http.ResponseWriter, r *http.Request, params api.
 	}
 
 	writeJSON(w, status, tripToAPI(trip))
-}
-
-func coordinatesValid(c api.Coordinates) bool {
-	return c.Latitude >= -90 && c.Latitude <= 90 &&
-		c.Longitude >= -180 && c.Longitude <= 180
 }

@@ -7,8 +7,16 @@ import (
 	"time"
 )
 
+type HTTPTimeouts struct {
+	Read       time.Duration
+	ReadHeader time.Duration
+	Write      time.Duration
+	Idle       time.Duration
+}
+
 type Config struct {
 	HTTPAddr        string
+	HTTPTimeouts    HTTPTimeouts
 	LogLevel        string
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
@@ -39,6 +47,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	httpTimeouts, err := loadHTTPTimeouts()
+	if err != nil {
+		return Config{}, err
+	}
+
 	logLevel, err := requiredString("LOG_LEVEL")
 	if err != nil {
 		return Config{}, err
@@ -46,10 +59,35 @@ func Load() (Config, error) {
 
 	return Config{
 		HTTPAddr:        httpAddr,
+		HTTPTimeouts:    httpTimeouts,
 		LogLevel:        logLevel,
 		ShutdownTimeout: shutdownTimeout,
 		Database:        database,
 	}, nil
+}
+
+func loadHTTPTimeouts() (HTTPTimeouts, error) {
+	read, err := optionalDuration("HTTP_READ_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return HTTPTimeouts{}, err
+	}
+
+	readHeader, err := optionalDuration("HTTP_READ_HEADER_TIMEOUT", 5*time.Second)
+	if err != nil {
+		return HTTPTimeouts{}, err
+	}
+
+	write, err := optionalDuration("HTTP_WRITE_TIMEOUT", 10*time.Second)
+	if err != nil {
+		return HTTPTimeouts{}, err
+	}
+
+	idle, err := optionalDuration("HTTP_IDLE_TIMEOUT", 60*time.Second)
+	if err != nil {
+		return HTTPTimeouts{}, err
+	}
+
+	return HTTPTimeouts{Read: read, ReadHeader: readHeader, Write: write, Idle: idle}, nil
 }
 
 func loadDatabase() (DatabaseConfig, error) {
@@ -133,6 +171,14 @@ func requiredDuration(name string) (time.Duration, error) {
 	}
 
 	return duration, nil
+}
+
+func optionalDuration(name string, fallback time.Duration) (time.Duration, error) {
+	if os.Getenv(name) == "" {
+		return fallback, nil
+	}
+
+	return requiredDuration(name)
 }
 
 func requiredInt32(name string) (int32, error) {

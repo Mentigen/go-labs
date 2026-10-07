@@ -61,15 +61,23 @@ func (r *TripRepository) ClaimIdempotencyKey(
 	key uuid.UUID,
 	requestHash string,
 	tripID uuid.UUID,
+	ttl time.Duration,
 ) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, r.queryTimeout)
 	defer cancel()
+
+	cutoff := time.Now().Add(-ttl)
 
 	query, args, err := squirrel.
 		Insert("idempotency_keys").
 		Columns("key", "request_hash", "trip_id").
 		Values(key, requestHash, tripID).
-		Suffix("ON CONFLICT (key) DO NOTHING").
+		Suffix(
+			"ON CONFLICT (key) DO UPDATE SET request_hash = EXCLUDED.request_hash, "+
+				"trip_id = EXCLUDED.trip_id, created_at = now() "+
+				"WHERE idempotency_keys.created_at < ?",
+			cutoff,
+		).
 		PlaceholderFormat(squirrel.Dollar).
 		ToSql()
 	if err != nil {

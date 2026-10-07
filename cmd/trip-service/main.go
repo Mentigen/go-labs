@@ -5,8 +5,12 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Mentigen/go-labs/internal/config"
 	"github.com/Mentigen/go-labs/internal/database"
@@ -17,9 +21,14 @@ import (
 )
 
 func main() {
+	os.Exit(run())
+}
+
+func run() int {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Fatalf("load config: %v", err)
+		log.Printf("load config: %v", err)
+		return 1
 	}
 
 	connectContext, cancelConnect := context.WithTimeout(context.Background(), cfg.Database.ConnectTimeout)
@@ -27,9 +36,9 @@ func main() {
 	cancelConnect()
 
 	if err != nil {
-		log.Fatalf("connect to database: %v", err)
+		log.Printf("connect to database: %v", err)
+		return 1
 	}
-	defer pool.Close()
 
 	log.Printf("connected to PostgreSQL")
 
@@ -38,8 +47,15 @@ func main() {
 	tripService := service.NewTripService(tripRepository, transactionManager)
 
 	handler := httpserver.NewHandler(pool.Ping, cfg.Database.QueryTimeout, tripService)
-	router := httpserver.NewRouter(handler)
-	server := httpserver.New(cfg.HTTPAddr, router)
+
+	router, err := httpserver.NewRouter(handler)
+	if err != nil {
+		log.Printf("build router: %v", err)
+		pool.Close()
+		return 1
+	}
+
+	server := httpserver.New(cfg.HTTPAddr, router, cfg.HTTPTimeouts)
 
 	serverErrors := make(chan error, 1)
 
@@ -53,20 +69,47 @@ func main() {
 
 	select {
 	case err := <-serverErrors:
+		pool.Close()
+
 		if !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("http server: %v", err)
+			log.Printf("http server: %v", err)
+			return 1
 		}
 
 	case <-signalContext.Done():
 		log.Printf("shutdown signal received")
 
-		shutdownContext, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
-		defer cancel()
-
-		if err := server.Shutdown(shutdownContext); err != nil {
-			log.Printf("graceful shutdown failed: %v", err)
+		if !shutdown(server, pool, cfg.ShutdownTimeout) {
+			return 1
 		}
 	}
 
 	log.Printf("trip-service stopped")
+
+	return 0
+}
+
+func shutdown(server *http.Server, pool *pgxpool.Pool, budget time.Duration) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
+	defer cancel()
+
+	if err := server.Shutdown(ctx); err != nil {
+		log.Printf("shutdown budget %s exceeded while waiting for requests, forcing exit: %v", budget, err)
+		return false
+	}
+
+	closed := make(chan struct{})
+
+	go func() {
+		pool.Close()
+		close(closed)
+	}()
+
+	select {
+	case <-closed:
+		return true
+	case <-ctx.Done():
+		log.Printf("shutdown budget %s exceeded while closing database pool, forcing exit", budget)
+		return false
+	}
 }

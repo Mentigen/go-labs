@@ -58,7 +58,7 @@ func (s *TripService) CreateIdempotent(
 	trip = newTrip(input)
 
 	err = s.txManager.Do(ctx, func(ctx context.Context) error {
-		claimed, err := s.repository.ClaimIdempotencyKey(ctx, key, requestHash, trip.ID)
+		claimed, err := s.repository.ClaimIdempotencyKey(ctx, key, requestHash, trip.ID, idempotencyKeyTTL)
 		if err != nil {
 			return err
 		}

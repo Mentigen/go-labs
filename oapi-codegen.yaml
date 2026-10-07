@@ -3,6 +3,7 @@ package: api
 generate:
   models: true
   chi-server: true
+  embedded-spec: true
 
 output: api/api.gen.go
 
