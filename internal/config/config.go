@@ -2,9 +2,16 @@ package config
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
+)
+
+const (
+	ProtocolHTTP       = "http/protobuf"
+	ProtocolGRPC       = "grpc"
+	DefaultServiceName = "trip-service"
 )
 
 type HTTPTimeouts struct {
@@ -17,9 +24,16 @@ type HTTPTimeouts struct {
 type Config struct {
 	HTTPAddr        string
 	HTTPTimeouts    HTTPTimeouts
-	LogLevel        string
+	LogLevel        slog.Level
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
+	Telemetry       TelemetryConfig
+}
+
+type TelemetryConfig struct {
+	ServiceName string
+	Endpoint    string
+	Protocol    string
 }
 
 type DatabaseConfig struct {
@@ -52,7 +66,12 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	logLevel, err := requiredString("LOG_LEVEL")
+	logLevel, err := loadLogLevel()
+	if err != nil {
+		return Config{}, err
+	}
+
+	telemetry, err := loadTelemetry()
 	if err != nil {
 		return Config{}, err
 	}
@@ -63,6 +82,43 @@ func Load() (Config, error) {
 		LogLevel:        logLevel,
 		ShutdownTimeout: shutdownTimeout,
 		Database:        database,
+		Telemetry:       telemetry,
+	}, nil
+}
+
+func loadLogLevel() (slog.Level, error) {
+	value, err := requiredString("LOG_LEVEL")
+	if err != nil {
+		return 0, err
+	}
+
+	var level slog.Level
+
+	if err := level.UnmarshalText([]byte(value)); err != nil {
+		return 0, fmt.Errorf("environment variable LOG_LEVEL: invalid level %q: %w", value, err)
+	}
+
+	return level, nil
+}
+
+func loadTelemetry() (TelemetryConfig, error) {
+	endpoint, err := requiredString("OTEL_EXPORTER_OTLP_ENDPOINT")
+	if err != nil {
+		return TelemetryConfig{}, err
+	}
+
+	protocol := optionalString("OTEL_EXPORTER_OTLP_PROTOCOL", ProtocolHTTP)
+	if protocol != ProtocolHTTP && protocol != ProtocolGRPC {
+		return TelemetryConfig{}, fmt.Errorf(
+			"environment variable OTEL_EXPORTER_OTLP_PROTOCOL must be %q or %q, got %q",
+			ProtocolHTTP, ProtocolGRPC, protocol,
+		)
+	}
+
+	return TelemetryConfig{
+		ServiceName: optionalString("OTEL_SERVICE_NAME", DefaultServiceName),
+		Endpoint:    endpoint,
+		Protocol:    protocol,
 	}, nil
 }
 
@@ -144,6 +200,14 @@ func loadDatabase() (DatabaseConfig, error) {
 		ConnectTimeout:  connectTimeout,
 		QueryTimeout:    queryTimeout,
 	}, nil
+}
+
+func optionalString(name, fallback string) string {
+	if value := os.Getenv(name); value != "" {
+		return value
+	}
+
+	return fallback
 }
 
 func requiredString(name string) (string, error) {
