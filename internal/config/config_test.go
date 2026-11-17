@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Mentigen/go-labs/internal/config"
 )
 
@@ -42,13 +45,9 @@ func TestLoadReadsTelemetrySettings(t *testing.T) {
 	setValidEnvironment(t)
 
 	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err, "unexpected error: %v", err)
 
-	if cfg.LogLevel != slog.LevelDebug {
-		t.Errorf("log level = %v, want debug", cfg.LogLevel)
-	}
+	assert.Equal(t, slog.LevelDebug, cfg.LogLevel, "log level = %v, want debug", cfg.LogLevel)
 
 	want := config.TelemetryConfig{
 		ServiceName: config.DefaultServiceName,
@@ -56,9 +55,7 @@ func TestLoadReadsTelemetrySettings(t *testing.T) {
 		Protocol:    config.ProtocolHTTP,
 	}
 
-	if cfg.Telemetry != want {
-		t.Errorf("telemetry = %+v, want %+v", cfg.Telemetry, want)
-	}
+	assert.Equal(t, want, cfg.Telemetry, "telemetry = %+v, want %+v", cfg.Telemetry, want)
 }
 
 func TestLoadFailsFast(t *testing.T) {
@@ -85,9 +82,7 @@ func TestLoadFailsFast(t *testing.T) {
 			}
 
 			_, err := config.Load()
-			if err == nil || !strings.Contains(err.Error(), test.wantErr) {
-				t.Fatalf("error = %v, want mention of %s", err, test.wantErr)
-			}
+			require.False(t, err == nil || !strings.Contains(err.Error(), test.wantErr), "error = %v, want mention of %s", err, test.wantErr)
 		})
 	}
 }

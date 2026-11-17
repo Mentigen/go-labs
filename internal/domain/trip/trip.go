@@ -1,17 +1,15 @@
 package trip
 
 import (
+	"errors"
+	"strings"
 	"time"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 )
 
-const (
-	minLatitude  = -90
-	maxLatitude  = 90
-	minLongitude = -180
-	maxLongitude = 180
-)
+var validateStruct = validator.New()
 
 type Status string
 
@@ -21,8 +19,8 @@ const (
 )
 
 type Coordinates struct {
-	Latitude  float64
-	Longitude float64
+	Latitude  float64 `validate:"gte=-90,lte=90"`
+	Longitude float64 `validate:"gte=-180,lte=180"`
 }
 
 type Trip struct {
@@ -44,13 +42,13 @@ type Trip struct {
 }
 
 type NewParams struct {
-	UserID   uuid.UUID
-	DriverID uuid.UUID
+	UserID   uuid.UUID `validate:"required"`
+	DriverID uuid.UUID `validate:"required"`
 
 	StartPoint Coordinates
 	EndPoint   Coordinates
 
-	Price int64
+	Price int64 `validate:"gte=0"`
 }
 
 func New(id uuid.UUID, now time.Time, params NewParams) (Trip, error) {
@@ -88,37 +86,25 @@ func (t *Trip) Finish(at time.Time) error {
 }
 
 func validate(params NewParams) error {
-	if params.UserID == uuid.Nil {
-		return NewValidationError("user_id", "must not be empty")
+	err := validateStruct.Struct(params)
+	if err == nil {
+		return nil
 	}
-
-	if params.DriverID == uuid.Nil {
-		return NewValidationError("driver_id", "must not be empty")
-	}
-
-	if err := validateCoordinates("start_point", params.StartPoint); err != nil {
+	var violations validator.ValidationErrors
+	if !errors.As(err, &violations) {
 		return err
 	}
-
-	if err := validateCoordinates("end_point", params.EndPoint); err != nil {
-		return err
+	violation := violations[0]
+	field := strings.TrimPrefix(violation.StructNamespace(), "NewParams.")
+	names := strings.NewReplacer("UserID", "user_id", "DriverID", "driver_id", "StartPoint", "start_point", "EndPoint", "end_point", "Latitude", "latitude", "Longitude", "longitude", "Price", "price")
+	reason := "must not be empty"
+	switch violation.StructField() {
+	case "Latitude":
+		reason = "must be between -90 and 90"
+	case "Longitude":
+		reason = "must be between -180 and 180"
+	case "Price":
+		reason = "must not be negative"
 	}
-
-	if params.Price < 0 {
-		return NewValidationError("price", "must not be negative")
-	}
-
-	return nil
-}
-
-func validateCoordinates(field string, point Coordinates) error {
-	if !(point.Latitude >= minLatitude && point.Latitude <= maxLatitude) {
-		return NewValidationError(field+".latitude", "must be between -90 and 90")
-	}
-
-	if !(point.Longitude >= minLongitude && point.Longitude <= maxLongitude) {
-		return NewValidationError(field+".longitude", "must be between -180 and 180")
-	}
-
-	return nil
+	return NewValidationError(names.Replace(field), reason)
 }

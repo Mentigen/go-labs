@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,24 +17,27 @@ const idempotencyKeyTTL = 24 * time.Hour
 var errIdempotencyKeyLost = errors.New("idempotency key claimed by a concurrent request")
 
 type Usecase struct {
+	hasher     requestHasher
 	repository tripRepository
 	txManager  txManager
 	metrics    metrics
-	logger     *slog.Logger
+	logger     logger
 	now        func() time.Time
 	newID      func() uuid.UUID
 }
 
 func New(
 	repository tripRepository,
+	hasher requestHasher,
 	txManager txManager,
 	metrics metrics,
-	logger *slog.Logger,
+	logger logger,
 	now func() time.Time,
 	newID func() uuid.UUID,
 ) *Usecase {
 	return &Usecase{
 		repository: repository,
+		hasher:     hasher,
 		txManager:  txManager,
 		metrics:    metrics,
 		logger:     logger,
@@ -80,7 +82,7 @@ func (u *Usecase) executeIdempotent(
 	params tripdomain.NewParams,
 	key uuid.UUID,
 ) (model.CreateTripResult, error) {
-	requestHash := hashParams(params)
+	requestHash := u.hasher.Params(params)
 
 	existing, found, err := u.lookup(ctx, key, requestHash)
 	if err != nil {
@@ -170,5 +172,5 @@ func (u *Usecase) insert(ctx context.Context, trip tripdomain.Trip) error {
 
 func (u *Usecase) created(ctx context.Context, trip tripdomain.Trip) {
 	u.metrics.TripCreated(ctx)
-	u.logger.InfoContext(ctx, "trip created", slog.String("trip_id", trip.ID.String()))
+	u.logger.InfoContext(ctx, "trip created", "trip_id", trip.ID.String())
 }

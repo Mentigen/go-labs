@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	"github.com/Mentigen/go-labs/internal/http/health"
@@ -21,9 +23,7 @@ func TestHealthDoesNotTouchTheDatabase(t *testing.T) {
 
 	handler.Health(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
 }
 
 func TestReady(t *testing.T) {
@@ -52,9 +52,7 @@ func TestReady(t *testing.T) {
 				httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ready", nil),
 			)
 
-			if recorder.Code != test.wantStatus {
-				t.Errorf("status = %d, want %d", recorder.Code, test.wantStatus)
-			}
+			assert.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d", recorder.Code, test.wantStatus)
 		})
 	}
 }

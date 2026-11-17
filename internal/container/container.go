@@ -21,6 +21,7 @@ import (
 	"github.com/Mentigen/go-labs/internal/infra/postgres"
 	"github.com/Mentigen/go-labs/internal/infra/postgres/transaction"
 	"github.com/Mentigen/go-labs/internal/infra/telemetry"
+	"github.com/Mentigen/go-labs/internal/infra/triphash"
 	triprepository "github.com/Mentigen/go-labs/internal/repository/trip"
 	createusecase "github.com/Mentigen/go-labs/internal/usecase/trip/create"
 	finishusecase "github.com/Mentigen/go-labs/internal/usecase/trip/finish"
@@ -146,7 +147,7 @@ func newServer(
 
 	now := time.Now
 
-	createUsecase := createusecase.New(repository, txManager, tripMetrics, logger, now, uuid.New)
+	createUsecase := createusecase.New(repository, triphash.Hasher{}, txManager, tripMetrics, logger, now, uuid.New)
 	getUsecase := getusecase.New(repository)
 	finishUsecase := finishusecase.New(repository, txManager, tripMetrics, logger, now)
 

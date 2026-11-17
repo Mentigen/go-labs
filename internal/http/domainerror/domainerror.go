@@ -61,27 +61,28 @@ func Problem(err error) (int, generated.Problem) {
 		return problem(http.StatusBadRequest, codeInvalidRequest, titleInvalidRequest, validationError.Error())
 	case errors.As(err, &requestError):
 		return problem(http.StatusBadRequest, codeInvalidRequest, titleInvalidRequest, requestError.Detail)
-	case errors.Is(err, ErrRouteNotFound):
-		return problem(http.StatusNotFound, codeNotFound, titleNotFound, "Path was not found")
-	case errors.Is(err, ErrMethodNotAllowed):
-		return problem(
-			http.StatusMethodNotAllowed, codeMethodNotAllowed, titleMethodNotAllowed,
-			"Method is not allowed for this path",
-		)
-	case errors.Is(err, trip.ErrTripNotFound):
-		return problem(http.StatusNotFound, codeTripNotFound, titleTripNotFound, "Trip with this id does not exist")
-	case errors.Is(err, trip.ErrTripCompleted):
-		return problem(http.StatusConflict, codeTripCompleted, titleTripCompleted, "Trip is already completed")
-	case errors.Is(err, trip.ErrDriverBusy):
-		return problem(http.StatusConflict, codeDriverBusy, titleDriverBusy, "Driver already has an active trip")
-	case errors.Is(err, trip.ErrIdempotencyConflict):
-		return problem(
-			http.StatusConflict, codeIdempotencyConflict, titleIdempotencyConflict,
-			"Idempotency-Key was already used with a different request body",
-		)
-	default:
-		return problem(http.StatusInternalServerError, codeInternalError, titleInternalError, internalErrorDetail)
 	}
+	for _, mapping := range mappings {
+		if errors.Is(err, mapping.err) {
+			return problem(mapping.status, mapping.code, mapping.title, mapping.detail)
+		}
+	}
+	return problem(http.StatusInternalServerError, codeInternalError, titleInternalError, internalErrorDetail)
+}
+
+type errorMapping struct {
+	err                 error
+	status              int
+	code, title, detail string
+}
+
+var mappings = []errorMapping{
+	{ErrRouteNotFound, http.StatusNotFound, codeNotFound, titleNotFound, "Path was not found"},
+	{ErrMethodNotAllowed, http.StatusMethodNotAllowed, codeMethodNotAllowed, titleMethodNotAllowed, "Method is not allowed for this path"},
+	{trip.ErrTripNotFound, http.StatusNotFound, codeTripNotFound, titleTripNotFound, "Trip with this id does not exist"},
+	{trip.ErrTripCompleted, http.StatusConflict, codeTripCompleted, titleTripCompleted, "Trip is already completed"},
+	{trip.ErrDriverBusy, http.StatusConflict, codeDriverBusy, titleDriverBusy, "Driver already has an active trip"},
+	{trip.ErrIdempotencyConflict, http.StatusConflict, codeIdempotencyConflict, titleIdempotencyConflict, "Idempotency-Key was already used with a different request body"},
 }
 
 func Write(w http.ResponseWriter, r *http.Request, logger *slog.Logger, err error) {

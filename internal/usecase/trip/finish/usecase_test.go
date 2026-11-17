@@ -3,12 +3,12 @@ package finish_test
 import (
 	"context"
 	"errors"
-	"io"
-	"log/slog"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	tripdomain "github.com/Mentigen/go-labs/internal/domain/trip"
@@ -24,6 +24,7 @@ var (
 )
 
 type fixture struct {
+	logger     *Mocklogger
 	repository *MocktripRepository
 	metrics    *Mockmetrics
 	usecase    *finish.Usecase
@@ -43,6 +44,7 @@ func newFixture(t *testing.T) *fixture {
 		AnyTimes()
 
 	f := &fixture{
+		logger:     NewMocklogger(ctrl),
 		repository: NewMocktripRepository(ctrl),
 		metrics:    NewMockmetrics(ctrl),
 	}
@@ -51,7 +53,7 @@ func newFixture(t *testing.T) *fixture {
 		f.repository,
 		txManager,
 		f.metrics,
-		slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		f.logger,
 		func() time.Time { return now },
 	)
 
@@ -62,90 +64,47 @@ func activeTrip() tripdomain.Trip {
 	return tripdomain.Trip{ID: tripID, Status: tripdomain.StatusActive, StartedAt: started, UpdatedAt: started}
 }
 
-func TestExecuteFinishesActiveTrip(t *testing.T) {
+func TestExecute(t *testing.T) {
 	t.Parallel()
-
-	f := newFixture(t)
-
-	f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
-	f.repository.EXPECT().
-		Finish(gomock.Any(), gomock.Cond(func(trip tripdomain.Trip) bool {
-			return trip.Status == tripdomain.StatusCompleted &&
-				trip.FinishedAt != nil && trip.FinishedAt.Equal(now)
-		})).
-		Return(nil)
-	f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(nil)
-	f.metrics.EXPECT().TripCompleted(gomock.Any())
-
-	got, err := f.usecase.Execute(context.Background(), tripID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	if got.Status != tripdomain.StatusCompleted {
-		t.Errorf("status = %q, want %q", got.Status, tripdomain.StatusCompleted)
-	}
-
-	if got.FinishedAt == nil || !got.FinishedAt.Equal(now) {
-		t.Errorf("finished_at = %v, want %v", got.FinishedAt, now)
-	}
-}
-
-func TestExecuteCompletedTripIsRejectedByDomain(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-
 	completed := activeTrip()
 	completed.Status = tripdomain.StatusCompleted
-	completed.FinishedAt = &started
-
-	f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(completed, nil)
-
-	_, err := f.usecase.Execute(context.Background(), tripID)
-	if !errors.Is(err, tripdomain.ErrTripCompleted) {
-		t.Fatalf("error = %v, want ErrTripCompleted", err)
+	completed.FinishedAt = &now
+	completed.UpdatedAt = now
+	tests := []struct {
+		name                          string
+		stored                        tripdomain.Trip
+		getErr, finishErr, historyErr error
+		want                          tripdomain.Trip
+		wantErr                       error
+	}{
+		{name: "finished", stored: activeTrip(), want: completed},
+		{name: "already completed", stored: completed, wantErr: tripdomain.ErrTripCompleted},
+		{name: "not found", getErr: tripdomain.ErrTripNotFound, wantErr: tripdomain.ErrTripNotFound},
+		{name: "lost race", stored: activeTrip(), finishErr: tripdomain.ErrTripCompleted, wantErr: tripdomain.ErrTripCompleted},
+		{name: "history failure", stored: activeTrip(), historyErr: errStorage, wantErr: errStorage},
 	}
-}
-
-func TestExecuteTripNotFound(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-
-	f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tripdomain.Trip{}, tripdomain.ErrTripNotFound)
-
-	_, err := f.usecase.Execute(context.Background(), tripID)
-	if !errors.Is(err, tripdomain.ErrTripNotFound) {
-		t.Fatalf("error = %v, want ErrTripNotFound", err)
-	}
-}
-
-func TestExecuteLostRaceAgainstConcurrentFinish(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-
-	f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
-	f.repository.EXPECT().Finish(gomock.Any(), gomock.Any()).Return(tripdomain.ErrTripCompleted)
-
-	_, err := f.usecase.Execute(context.Background(), tripID)
-	if !errors.Is(err, tripdomain.ErrTripCompleted) {
-		t.Fatalf("error = %v, want ErrTripCompleted", err)
-	}
-}
-
-func TestExecuteHistoryFailureFailsTheWholeOperation(t *testing.T) {
-	t.Parallel()
-
-	f := newFixture(t)
-
-	f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
-	f.repository.EXPECT().Finish(gomock.Any(), gomock.Any()).Return(nil)
-	f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(errStorage)
-
-	_, err := f.usecase.Execute(context.Background(), tripID)
-	if !errors.Is(err, errStorage) {
-		t.Fatalf("error = %v, want storage error", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			f := newFixture(t)
+			f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tt.stored, tt.getErr)
+			if tt.getErr == nil && tt.stored.Status == tripdomain.StatusActive {
+				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(tt.finishErr)
+				if tt.finishErr == nil {
+					f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(tt.historyErr)
+				}
+			}
+			if tt.wantErr == nil {
+				f.metrics.EXPECT().TripCompleted(gomock.Any())
+				f.logger.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", tripID.String())
+			}
+			got, err := f.usecase.Execute(context.Background(), tripID)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			assert.Equal(t, tt.want, got)
+		})
 	}
 }

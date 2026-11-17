@@ -1,12 +1,13 @@
 package trip_test
 
 import (
-	"errors"
 	"math"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/Mentigen/go-labs/internal/domain/trip"
 )
@@ -33,25 +34,15 @@ func TestNew(t *testing.T) {
 	t.Parallel()
 
 	created, err := trip.New(tripID, now, validParams())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	require.NoError(t, err, "unexpected error: %v", err)
 
-	if created.ID != tripID || created.UserID != userID || created.DriverID != driverID {
-		t.Errorf("identifiers were not copied: %+v", created)
-	}
+	assert.False(t, created.ID != tripID || created.UserID != userID || created.DriverID != driverID, "identifiers were not copied: %+v", created)
 
-	if created.Status != trip.StatusActive {
-		t.Errorf("status = %q, want %q", created.Status, trip.StatusActive)
-	}
+	assert.Equal(t, trip.StatusActive, created.Status, "status = %q, want %q", created.Status, trip.StatusActive)
 
-	if created.FinishedAt != nil {
-		t.Errorf("finished_at = %v, want nil", created.FinishedAt)
-	}
+	assert.Nil(t, created.FinishedAt, "finished_at = %v, want nil", created.FinishedAt)
 
-	if !created.StartedAt.Equal(now) || !created.CreatedAt.Equal(now) || !created.UpdatedAt.Equal(now) {
-		t.Errorf("timestamps must equal creation time: %+v", created)
-	}
+	assert.False(t, !created.StartedAt.Equal(now) || !created.CreatedAt.Equal(now) || !created.UpdatedAt.Equal(now), "timestamps must equal creation time: %+v", created)
 }
 
 func TestNewValidation(t *testing.T) {
@@ -82,13 +73,9 @@ func TestNewValidation(t *testing.T) {
 			_, err := trip.New(tripID, now, params)
 
 			var validationError *trip.ValidationError
-			if !errors.As(err, &validationError) {
-				t.Fatalf("error = %v, want *ValidationError", err)
-			}
+			require.ErrorAs(t, err, &validationError, "error = %v, want *ValidationError", err)
 
-			if validationError.Field != test.wantField {
-				t.Errorf("field = %q, want %q", validationError.Field, test.wantField)
-			}
+			assert.Equal(t, test.wantField, validationError.Field, "field = %q, want %q", validationError.Field, test.wantField)
 		})
 	}
 }
@@ -133,21 +120,18 @@ func TestFinish(t *testing.T) {
 			t.Parallel()
 
 			current := test.current
-			if err := current.Finish(later); !errors.Is(err, test.wantErr) {
-				t.Fatalf("error = %v, want %v", err, test.wantErr)
+			err := current.Finish(later)
+			if test.wantErr != nil {
+				require.ErrorIs(t, err, test.wantErr)
+			} else {
+				require.NoError(t, err)
 			}
 
-			if current.Status != trip.StatusCompleted {
-				t.Errorf("status = %q, want %q", current.Status, trip.StatusCompleted)
-			}
+			assert.Equal(t, trip.StatusCompleted, current.Status, "status = %q, want %q", current.Status, trip.StatusCompleted)
 
-			if current.FinishedAt == nil || !current.FinishedAt.Equal(test.wantAt) {
-				t.Errorf("finished_at = %v, want %v", current.FinishedAt, test.wantAt)
-			}
+			assert.False(t, current.FinishedAt == nil || !current.FinishedAt.Equal(test.wantAt), "finished_at = %v, want %v", current.FinishedAt, test.wantAt)
 
-			if !current.UpdatedAt.Equal(test.wantAt) {
-				t.Errorf("updated_at = %v, want %v", current.UpdatedAt, test.wantAt)
-			}
+			assert.True(t, current.UpdatedAt.Equal(test.wantAt), "updated_at = %v, want %v", current.UpdatedAt, test.wantAt)
 		})
 	}
 }

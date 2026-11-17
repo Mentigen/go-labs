@@ -11,6 +11,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace/noop"
 
 	tripdomain "github.com/Mentigen/go-labs/internal/domain/trip"
@@ -80,9 +82,7 @@ func newTrip(t *testing.T) tripdomain.Trip {
 		EndPoint:   tripdomain.Coordinates{Latitude: 55.80, Longitude: 37.70},
 		Price:      500,
 	})
-	if err != nil {
-		t.Fatalf("build trip: %v", err)
-	}
+	require.NoError(t, err, "build trip: %v", err)
 
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -106,9 +106,7 @@ func TestSaveAndGetByID(t *testing.T) {
 	}
 
 	got, err := e.repository.GetByID(ctx, want.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
+	require.NoError(t, err, "get: %v", err)
 
 	if got.ID != want.ID || got.UserID != want.UserID || got.DriverID != want.DriverID ||
 		got.StartPoint != want.StartPoint || got.EndPoint != want.EndPoint ||
@@ -121,9 +119,7 @@ func TestGetByIDMissingTrip(t *testing.T) {
 	e := newEnv(t)
 
 	_, err := e.repository.GetByID(context.Background(), uuid.New())
-	if !errors.Is(err, tripdomain.ErrTripNotFound) {
-		t.Fatalf("error = %v, want ErrTripNotFound", err)
-	}
+	require.ErrorIs(t, err, tripdomain.ErrTripNotFound, "error = %v, want ErrTripNotFound", err)
 }
 
 func TestSecondActiveTripOfTheSameDriverIsRejected(t *testing.T) {
@@ -191,13 +187,9 @@ func TestFinishIsConditionalOnActiveStatus(t *testing.T) {
 	}
 
 	got, err := e.repository.GetByID(ctx, stored.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
+	require.NoError(t, err, "get: %v", err)
 
-	if got.Status != tripdomain.StatusCompleted || got.FinishedAt == nil || !got.FinishedAt.Equal(finishedAt) {
-		t.Errorf("unexpected stored trip: %+v", got)
-	}
+	assert.False(t, got.Status != tripdomain.StatusCompleted || got.FinishedAt == nil || !got.FinishedAt.Equal(finishedAt), "unexpected stored trip: %+v", got)
 }
 
 func TestTransactionCommitsBothTables(t *testing.T) {
@@ -212,9 +204,7 @@ func TestTransactionCommitsBothTables(t *testing.T) {
 
 		return e.repository.AddCreatedHistory(ctx, stored.ID)
 	})
-	if err != nil {
-		t.Fatalf("transaction: %v", err)
-	}
+	require.NoError(t, err, "transaction: %v", err)
 
 	if got := historyRows(t, stored.ID); got != 1 {
 		t.Errorf("history rows = %d, want 1", got)
@@ -241,9 +231,7 @@ func TestTransactionRollsBackBothTablesOnError(t *testing.T) {
 
 		return e.repository.AddCreatedHistory(ctx, uuid.New())
 	})
-	if err == nil {
-		t.Fatal("expected the transaction to fail on the history row with an unknown trip")
-	}
+	require.Error(t, err, "expected the transaction to fail on the history row with an unknown trip")
 
 	if _, err := e.repository.GetByID(ctx, stored.ID); !errors.Is(err, tripdomain.ErrTripNotFound) {
 		t.Errorf("trip must be rolled back, got %v", err)
@@ -288,34 +276,24 @@ func TestIdempotencyKeyLifecycle(t *testing.T) {
 
 	err := e.txManager.Do(ctx, func(ctx context.Context) error {
 		claimed, err := e.repository.ClaimIdempotencyKey(ctx, key, "hash-1", stored.ID, time.Hour)
-		if err != nil || !claimed {
-			t.Errorf("first claim = %v, %v; want true, nil", claimed, err)
-		}
+		assert.False(t, err != nil || !claimed, "first claim = %v, %v; want true, nil", claimed, err)
 
 		return e.repository.Save(ctx, stored)
 	})
-	if err != nil {
-		t.Fatalf("claim and save: %v", err)
-	}
+	require.NoError(t, err, "claim and save: %v", err)
 
 	record, found, err := e.repository.GetIdempotencyKey(ctx, key, time.Hour)
-	if err != nil || !found || record.RequestHash != "hash-1" || record.TripID != stored.ID {
-		t.Fatalf("lookup = %+v, %v, %v", record, found, err)
-	}
+	require.False(t, err != nil || !found || record.RequestHash != "hash-1" || record.TripID != stored.ID, "lookup = %+v, %v, %v", record, found, err)
 
 	claimed, err := e.repository.ClaimIdempotencyKey(ctx, key, "hash-2", stored.ID, time.Hour)
-	if err != nil || claimed {
-		t.Errorf("a live key must not be claimed again, got %v, %v", claimed, err)
-	}
+	assert.False(t, err != nil || claimed, "a live key must not be claimed again, got %v, %v", claimed, err)
 
 	if _, found, _ := e.repository.GetIdempotencyKey(ctx, key, -time.Hour); found {
 		t.Error("a key older than the ttl must be invisible")
 	}
 
 	claimed, err = e.repository.ClaimIdempotencyKey(ctx, key, "hash-3", stored.ID, -time.Hour)
-	if err != nil || !claimed {
-		t.Errorf("an expired key must be taken over, got %v, %v", claimed, err)
-	}
+	assert.False(t, err != nil || !claimed, "an expired key must be taken over, got %v, %v", claimed, err)
 }
 
 func TestCountActive(t *testing.T) {
@@ -323,22 +301,16 @@ func TestCountActive(t *testing.T) {
 	ctx := context.Background()
 
 	before, err := e.repository.CountActive(ctx)
-	if err != nil {
-		t.Fatalf("count: %v", err)
-	}
+	require.NoError(t, err, "count: %v", err)
 
 	if err := e.repository.Save(ctx, newTrip(t)); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
 	after, err := e.repository.CountActive(ctx)
-	if err != nil {
-		t.Fatalf("count: %v", err)
-	}
+	require.NoError(t, err, "count: %v", err)
 
-	if after < before+1 {
-		t.Errorf("active trips: before %d, after %d", before, after)
-	}
+	assert.False(t, after < before+1, "active trips: before %d, after %d", before, after)
 }
 
 func historyRows(t *testing.T, tripID uuid.UUID) int {
@@ -347,9 +319,7 @@ func historyRows(t *testing.T, tripID uuid.UUID) int {
 	var count int
 
 	err := pool.QueryRow(context.Background(), `SELECT count(*) FROM trip_status_history WHERE trip_id = $1`, tripID).Scan(&count)
-	if err != nil {
-		t.Fatalf("count history: %v", err)
-	}
+	require.NoError(t, err, "count history: %v", err)
 
 	return count
 }
@@ -409,29 +379,21 @@ func TestConcurrentFinishCommitsExactlyOneHistoryRow(t *testing.T) {
 			t.Errorf("unexpected finish error: %v", err)
 		}
 	}
-	if succeeded != 1 || conflicted != 1 || historyRows(t, stored.ID) != 1 {
-		t.Errorf("successes = %d, conflicts = %d, want one of each and one history row", succeeded, conflicted)
-	}
+	assert.False(t, succeeded != 1 || conflicted != 1 || historyRows(t, stored.ID) != 1, "successes = %d, conflicts = %d, want one of each and one history row", succeeded, conflicted)
 }
 
 func TestTransactionBeginHasTimeoutWhenPoolIsExhausted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	cfg, err := pgxpool.ParseConfig(os.Getenv("DATABASE_URL"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	cfg.MaxConns = 1
 	cfg.MinConns = 0
 	limitedPool, err := pgxpool.NewWithConfig(ctx, cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer limitedPool.Close()
 	lease, err := limitedPool.Acquire(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 	defer lease.Release()
 
 	manager := transaction.NewManager(limitedPool, noop.NewTracerProvider().Tracer("test"), 25*time.Millisecond)
@@ -439,9 +401,8 @@ func TestTransactionBeginHasTimeoutWhenPoolIsExhausted(t *testing.T) {
 		t.Error("transaction callback must not run without a connection")
 		return nil
 	})
-	if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
-		t.Fatalf("begin must hit its own deadline: err = %v, parent = %v", err, ctx.Err())
-	}
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.NoError(t, ctx.Err())
 }
 
 func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
@@ -462,13 +423,9 @@ func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
 		cancel()
 		return nil
 	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("commit error = %v, want context.Canceled", err)
-	}
+	require.ErrorIs(t, err, context.Canceled, "commit error = %v, want context.Canceled", err)
 	if _, err := e.repository.GetByID(context.Background(), stored.ID); !errors.Is(err, tripdomain.ErrTripNotFound) {
 		t.Errorf("trip must not survive a canceled commit: %v", err)
 	}
-	if historyRows(t, stored.ID) != 0 {
-		t.Error("history must not survive a canceled commit")
-	}
+	assert.False(t, historyRows(t, stored.ID) != 0, "history must not survive a canceled commit")
 }

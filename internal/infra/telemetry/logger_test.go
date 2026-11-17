@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/Mentigen/go-labs/internal/infra/telemetry"
@@ -39,13 +40,9 @@ func TestLoggerAddsTraceIdentifiersInsideSpan(t *testing.T) {
 
 	record := decode(t, &buffer)
 
-	if record["trace_id"] != span.SpanContext().TraceID().String() {
-		t.Errorf("trace_id = %v, want %v", record["trace_id"], span.SpanContext().TraceID())
-	}
+	assert.Equal(t, span.SpanContext().TraceID().String(), record["trace_id"], "trace_id = %v, want %v", record["trace_id"], span.SpanContext().TraceID())
 
-	if record["span_id"] != span.SpanContext().SpanID().String() {
-		t.Errorf("span_id = %v, want %v", record["span_id"], span.SpanContext().SpanID())
-	}
+	assert.Equal(t, span.SpanContext().SpanID().String(), record["span_id"], "span_id = %v, want %v", record["span_id"], span.SpanContext().SpanID())
 }
 
 func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
@@ -65,17 +62,13 @@ func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
 		}
 	}
 
-	if record["service"] != "trip-service" || record["component"] != "test" {
-		t.Errorf("unexpected record: %v", record)
-	}
+	assert.False(t, record["service"] != "trip-service" || record["component"] != "test", "unexpected record: %v", record)
 
 	if _, ok := record["trace_id"]; ok {
 		t.Errorf("trace_id must be absent outside a span: %v", record)
 	}
 
-	if !strings.HasSuffix(record["time"].(string), "Z") {
-		t.Errorf("time must be UTC, got %v", record["time"])
-	}
+	assert.False(t, !strings.HasSuffix(record["time"].(string), "Z"), "time must be UTC, got %v", record["time"])
 }
 
 func TestLoggerHonoursLevel(t *testing.T) {
@@ -87,7 +80,5 @@ func TestLoggerHonoursLevel(t *testing.T) {
 
 	logger.InfoContext(context.Background(), "hidden")
 
-	if buffer.Len() != 0 {
-		t.Errorf("info record must be dropped at warn level: %s", buffer.String())
-	}
+	assert.Equal(t, 0, buffer.Len(), "info record must be dropped at warn level: %s", buffer.String())
 }

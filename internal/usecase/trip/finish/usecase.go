@@ -2,7 +2,6 @@ package finish
 
 import (
 	"context"
-	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,7 +13,7 @@ type Usecase struct {
 	repository tripRepository
 	txManager  txManager
 	metrics    metrics
-	logger     *slog.Logger
+	logger     logger
 	now        func() time.Time
 }
 
@@ -22,7 +21,7 @@ func New(
 	repository tripRepository,
 	txManager txManager,
 	metrics metrics,
-	logger *slog.Logger,
+	logger logger,
 	now func() time.Time,
 ) *Usecase {
 	return &Usecase{
@@ -64,7 +63,7 @@ func (u *Usecase) Execute(ctx context.Context, tripID uuid.UUID) (tripdomain.Tri
 	}
 
 	u.metrics.TripCompleted(ctx)
-	u.logger.InfoContext(ctx, "trip completed", slog.String("trip_id", tripID.String()))
+	u.logger.InfoContext(ctx, "trip completed", "trip_id", tripID.String())
 
 	return finished, nil
 }

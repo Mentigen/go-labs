@@ -11,6 +11,10 @@ import (
 //go:generate go tool mockgen -source ${GOFILE} -destination mocks_test.go -package ${GOPACKAGE}_test
 
 type (
+	logger interface {
+		InfoContext(ctx context.Context, msg string, args ...any)
+	}
+
 	tripRepository interface {
 		GetByID(ctx context.Context, tripID uuid.UUID) (tripdomain.Trip, error)
 		Finish(ctx context.Context, trip tripdomain.Trip) error

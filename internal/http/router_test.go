@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/propagation"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -93,9 +95,7 @@ func newHarness(t *testing.T,
 		MeterProvider:  meterProvider,
 		Propagator:     propagation.TraceContext{},
 	})
-	if err != nil {
-		t.Fatalf("build router: %v", err)
-	}
+	require.NoError(t, err, "build router: %v", err)
 
 	return &harness{handler: handler, spans: spans, reader: reader, logs: logs}
 }
@@ -161,9 +161,7 @@ func TestValidRequestsPassThrough(t *testing.T) {
 
 			recorder := h.do(test.method, test.path, test.contentType, test.body)
 
-			if recorder.Code != test.want {
-				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.want, recorder.Body.String())
-			}
+			require.Equal(t, test.want, recorder.Code, "status = %d, want %d: %s", recorder.Code, test.want, recorder.Body.String())
 		})
 	}
 }
@@ -202,9 +200,7 @@ func TestInvalidRequestsAreRejectedWithProblemJSON(t *testing.T) {
 
 			recorder := h.do(test.method, test.path, test.contentType, test.body)
 
-			if recorder.Code != test.wantStatus {
-				t.Fatalf("status = %d, want %d: %s", recorder.Code, test.wantStatus, recorder.Body.String())
-			}
+			require.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d: %s", recorder.Code, test.wantStatus, recorder.Body.String())
 
 			if got := recorder.Header().Get("Content-Type"); got != "application/problem+json" {
 				t.Errorf("content type = %q, want application/problem+json", got)
@@ -215,9 +211,7 @@ func TestInvalidRequestsAreRejectedWithProblemJSON(t *testing.T) {
 				t.Fatalf("decode problem: %v", err)
 			}
 
-			if problem.Code != test.wantCode {
-				t.Errorf("code = %q, want %q", problem.Code, test.wantCode)
-			}
+			assert.Equal(t, test.wantCode, problem.Code, "code = %q, want %q", problem.Code, test.wantCode)
 		})
 	}
 }
@@ -237,13 +231,9 @@ func TestPanicInHandlerIsRecovered(t *testing.T) {
 
 	recorder := h.do(http.MethodPost, tripsPath, contentTypeJSON, validBody)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", recorder.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
 
-	if strings.Contains(recorder.Body.String(), "nil pointer") {
-		t.Errorf("response leaks the panic value: %s", recorder.Body.String())
-	}
+	assert.NotContains(t, recorder.Body.String(), "nil pointer", "response leaks the panic value: %s", recorder.Body.String())
 
 	var problem generated.Problem
 	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil || problem.Code != "internal_error" {
@@ -253,32 +243,22 @@ func TestPanicInHandlerIsRecovered(t *testing.T) {
 	records := decodeLogs(t, h.logs)
 
 	panicRecord := findRecord(records, "panic recovered")
-	if panicRecord == nil || panicRecord["level"] != levelError || panicRecord["stack"] == "" {
-		t.Errorf("panic must be logged at ERROR with a stack: %v", panicRecord)
-	}
+	assert.False(t, panicRecord == nil || panicRecord["level"] != levelError || panicRecord["stack"] == "", "panic must be logged at ERROR with a stack: %v", panicRecord)
 
 	requestRecord := findRecord(records, "request handled")
-	if requestRecord == nil || requestRecord["level"] != levelError || requestRecord["status"] != float64(500) {
-		t.Errorf("request record must show the 500 at ERROR: %v", requestRecord)
-	}
+	assert.False(t, requestRecord == nil || requestRecord["level"] != levelError || requestRecord["status"] != float64(500), "request record must show the 500 at ERROR: %v", requestRecord)
 
 	spans := h.spans.GetSpans()
-	if len(spans) != 1 {
-		t.Fatalf("expected one failed HTTP span, got %d", len(spans))
-	}
+	require.Len(t, spans, 1, "expected one failed HTTP span, got %d", len(spans))
 
 	span := spans[0]
-	if span.Status.Code != codes.Error {
-		t.Errorf("panic span status = %v, want Error", span.Status)
-	}
+	assert.Equal(t, codes.Error, span.Status.Code, "panic span status = %v, want Error", span.Status)
 
 	attrs := make(map[string]any)
 	for _, attr := range span.Attributes {
 		attrs[string(attr.Key)] = attr.Value.AsInterface()
 	}
-	if attrs["http.response.status_code"] != int64(500) || attrs["error.type"] != "500" {
-		t.Errorf("panic span attributes = %v", attrs)
-	}
+	assert.False(t, attrs["http.response.status_code"] != int64(500) || attrs["error.type"] != "500", "panic span attributes = %v", attrs)
 
 	for _, record := range []map[string]any{panicRecord, requestRecord} {
 		if record["trace_id"] != span.SpanContext.TraceID().String() ||
@@ -300,32 +280,22 @@ func TestRequestLogUsesRouteTemplateAndCarriesTraceIDs(t *testing.T) {
 	h.do(http.MethodGet, "/api/v1/trips/"+tripID.String(), "", "")
 
 	records := decodeLogs(t, h.logs)
-	if len(records) != 1 {
-		t.Fatalf("expected exactly one record per request, got %d: %v", len(records), records)
-	}
+	require.Len(t, records, 1, "expected exactly one record per request, got %d: %v", len(records), records)
 
 	record := records[0]
 
-	if record["msg"] != "request handled" || record["level"] != "INFO" {
-		t.Errorf("unexpected record: %v", record)
-	}
+	assert.False(t, record["msg"] != "request handled" || record["level"] != "INFO", "unexpected record: %v", record)
 
-	if record["route"] != "/api/v1/trips/{tripId}" {
-		t.Errorf("route = %v, want the template", record["route"])
-	}
+	assert.Equal(t, "/api/v1/trips/{tripId}", record["route"], "route = %v, want the template", record["route"])
 
-	if record["method"] != "GET" || record["status"] != float64(200) || record["service"] != "trip-service" {
-		t.Errorf("missing fields: %v", record)
-	}
+	assert.False(t, record["method"] != "GET" || record["status"] != float64(200) || record["service"] != "trip-service", "missing fields: %v", record)
 
 	if _, ok := record["duration_ms"]; !ok {
 		t.Error("duration_ms is missing")
 	}
 
 	spans := h.spans.GetSpans()
-	if len(spans) != 1 {
-		t.Fatalf("expected one span, got %d", len(spans))
-	}
+	require.Len(t, spans, 1, "expected one span, got %d", len(spans))
 
 	if record["trace_id"] != spans[0].SpanContext.TraceID().String() ||
 		record["span_id"] != spans[0].SpanContext.SpanID().String() {
@@ -355,13 +325,9 @@ func TestRequestLogLevelFollowsStatus(t *testing.T) {
 		}
 	}
 
-	if statusToLevel[409] != "INFO" {
-		t.Errorf("4xx must be logged at INFO, got %q", statusToLevel[409])
-	}
+	assert.Equal(t, "INFO", statusToLevel[409], "4xx must be logged at INFO, got %q", statusToLevel[409])
 
-	if statusToLevel[500] != levelError {
-		t.Errorf("5xx must be logged at ERROR, got %q", statusToLevel[500])
-	}
+	assert.Equal(t, levelError, statusToLevel[500], "5xx must be logged at ERROR, got %q", statusToLevel[500])
 }
 
 type assertionError struct{}
@@ -383,15 +349,11 @@ func TestServerSpanIsNamedAfterMethodAndRouteTemplate(t *testing.T) {
 	}
 
 	for _, want := range []string{"GET /api/v1/trips/{tripId}", "POST /api/v1/trips"} {
-		if !names[want] {
-			t.Errorf("span %q not found, have %v", want, names)
-		}
+		assert.True(t, names[want], "span %q not found, have %v", want, names)
 	}
 
 	for name := range names {
-		if strings.Contains(name, tripID.String()) {
-			t.Errorf("span name contains the raw id: %q", name)
-		}
+		assert.NotContains(t, name, tripID.String(), "span name contains the raw id: %q", name)
 	}
 }
 
@@ -432,13 +394,9 @@ func TestMetricsUseRouteTemplateAndCoverRequiredInstruments(t *testing.T) {
 		}
 	}
 
-	if !instruments["http.server.request.duration"] || !instruments["http.server.active_requests"] {
-		t.Errorf("required instruments are missing, have %v", instruments)
-	}
+	assert.True(t, instruments["http.server.request.duration"] || !instruments["http.server.active_requests"], "required instruments are missing, have %v", instruments)
 
-	if len(routes) != 1 || !routes["/api/v1/trips/{tripId}"] {
-		t.Errorf("http.route must hold only the template, got %v", routes)
-	}
+	assert.False(t, len(routes) != 1 || !routes["/api/v1/trips/{tripId}"], "http.route must hold only the template, got %v", routes)
 }
 
 func decodeLogs(t *testing.T, buffer *bytes.Buffer) []map[string]any {

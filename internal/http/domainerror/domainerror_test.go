@@ -12,6 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	"github.com/Mentigen/go-labs/internal/domain/trip"
 	"github.com/Mentigen/go-labs/internal/generated"
 	"github.com/Mentigen/go-labs/internal/http/domainerror"
@@ -46,21 +49,15 @@ func TestProblem(t *testing.T) {
 
 			status, body := domainerror.Problem(test.err)
 
-			if status != test.wantStatus || int(body.Status) != test.wantStatus {
-				t.Errorf("status = %d (body %d), want %d", status, body.Status, test.wantStatus)
-			}
+			assert.False(t, status != test.wantStatus || int(body.Status) != test.wantStatus, "status = %d (body %d), want %d", status, body.Status, test.wantStatus)
 
-			if body.Code != test.wantCode {
-				t.Errorf("code = %q, want %q", body.Code, test.wantCode)
-			}
+			assert.Equal(t, test.wantCode, body.Code, "code = %q, want %q", body.Code, test.wantCode)
 
 			if want := "https://tripgo.example/problems/" + test.wantType; body.Type != want {
 				t.Errorf("type = %q, want %q", body.Type, want)
 			}
 
-			if body.Title == "" || body.Detail == nil || *body.Detail == "" {
-				t.Errorf("title and detail must be filled: %+v", body)
-			}
+			assert.False(t, body.Title == "" || body.Detail == nil || *body.Detail == "", "title and detail must be filled: %+v", body)
 		})
 	}
 }
@@ -70,9 +67,7 @@ func TestProblemKeepsValidationDetails(t *testing.T) {
 
 	_, body := domainerror.Problem(trip.NewValidationError("start_point.latitude", "must be between -90 and 90"))
 
-	if body.Detail == nil || !strings.Contains(*body.Detail, "start_point.latitude") {
-		t.Errorf("detail must name the failing field, got %v", body.Detail)
-	}
+	assert.False(t, body.Detail == nil || !strings.Contains(*body.Detail, "start_point.latitude"), "detail must name the failing field, got %v", body.Detail)
 }
 
 func TestProblemHidesInternalDetails(t *testing.T) {
@@ -83,14 +78,10 @@ func TestProblemHidesInternalDetails(t *testing.T) {
 	_, body := domainerror.Problem(errors.New(secret))
 
 	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatalf("marshal problem: %v", err)
-	}
+	require.NoError(t, err, "marshal problem: %v", err)
 
 	for _, leaked := range []string{"SQLSTATE", "relation", "hunter2", "trips"} {
-		if strings.Contains(string(raw), leaked) {
-			t.Errorf("problem leaks %q: %s", leaked, raw)
-		}
+		assert.NotContains(t, string(raw), leaked, "problem leaks %q: %s", leaked, raw)
 	}
 }
 
@@ -105,9 +96,7 @@ func TestWriteSetsHeadersInstanceAndLogsServerErrorsOnce(t *testing.T) {
 
 	domainerror.Write(recorder, request, logger, errors.New("database exploded"))
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", recorder.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
 
 	if got := recorder.Header().Get("Content-Type"); got != "application/problem+json" {
 		t.Errorf("content type = %q", got)
@@ -118,13 +107,9 @@ func TestWriteSetsHeadersInstanceAndLogsServerErrorsOnce(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 
-	if body.Instance == nil || *body.Instance != "/api/v1/trips/abc" {
-		t.Errorf("instance = %v", body.Instance)
-	}
+	assert.False(t, body.Instance == nil || *body.Instance != "/api/v1/trips/abc", "instance = %v", body.Instance)
 
-	if strings.Contains(recorder.Body.String(), "database exploded") {
-		t.Errorf("response leaks the internal error: %s", recorder.Body.String())
-	}
+	assert.NotContains(t, recorder.Body.String(), "database exploded", "response leaks the internal error: %s", recorder.Body.String())
 
 	if got := strings.Count(logs.String(), "database exploded"); got != 1 {
 		t.Errorf("internal error logged %d times, want 1", got)
@@ -142,11 +127,7 @@ func TestWriteDoesNotLogClientErrors(t *testing.T) {
 
 	domainerror.Write(recorder, request, logger, trip.ErrTripNotFound)
 
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", recorder.Code)
-	}
+	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
 
-	if logs.Len() != 0 {
-		t.Errorf("client errors must not be logged by the mapper: %s", logs.String())
-	}
+	assert.Equal(t, 0, logs.Len(), "client errors must not be logged by the mapper: %s", logs.String())
 }

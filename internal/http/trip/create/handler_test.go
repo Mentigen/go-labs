@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	tripdomain "github.com/Mentigen/go-labs/internal/domain/trip"
@@ -91,9 +93,7 @@ func TestHandleCreatesTrip(t *testing.T) {
 
 	recorder := serve(handler, validBody, generated.CreateTripParams{})
 
-	if recorder.Code != http.StatusCreated {
-		t.Fatalf("status = %d, want 201: %s", recorder.Code, recorder.Body.String())
-	}
+	require.Equal(t, http.StatusCreated, recorder.Code, "status = %d, want 201: %s", recorder.Code, recorder.Body.String())
 
 	if got, want := recorder.Header().Get("Location"), "/api/v1/trips/"+tripID.String(); got != want {
 		t.Errorf("location = %q, want %q", got, want)
@@ -104,9 +104,7 @@ func TestHandleCreatesTrip(t *testing.T) {
 		t.Fatalf("decode body: %v", err)
 	}
 
-	if body.Id != tripID || body.Status != generated.TripStatus(tripdomain.StatusActive) {
-		t.Errorf("unexpected body: %+v", body)
-	}
+	assert.False(t, body.Id != tripID || body.Status != generated.TripStatus(tripdomain.StatusActive), "unexpected body: %+v", body)
 }
 
 func TestHandlePassesIdempotencyKeyAndAnswers200OnReplay(t *testing.T) {
@@ -122,9 +120,7 @@ func TestHandlePassesIdempotencyKeyAndAnswers200OnReplay(t *testing.T) {
 
 	recorder := serve(handler, validBody, generated.CreateTripParams{IdempotencyKey: &key})
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
 
 	if location := recorder.Header().Get("Location"); location != "" {
 		t.Errorf("replay must not set Location, got %q", location)
@@ -155,9 +151,7 @@ func TestHandleMapsUsecaseErrors(t *testing.T) {
 
 			recorder := serve(handler, validBody, generated.CreateTripParams{})
 
-			if recorder.Code != test.wantStatus {
-				t.Fatalf("status = %d, want %d", recorder.Code, test.wantStatus)
-			}
+			require.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d", recorder.Code, test.wantStatus)
 
 			if problem := decodeProblem(t, recorder); problem.Code != test.wantCode {
 				t.Errorf("code = %q, want %q", problem.Code, test.wantCode)
@@ -182,9 +176,7 @@ func TestHandleRejectsMalformedBody(t *testing.T) {
 
 			recorder := serve(handler, body, generated.CreateTripParams{})
 
-			if recorder.Code != http.StatusBadRequest {
-				t.Fatalf("status = %d, want 400", recorder.Code)
-			}
+			require.Equal(t, http.StatusBadRequest, recorder.Code, "status = %d, want 400", recorder.Code)
 
 			if got := recorder.Header().Get("Content-Type"); got != "application/problem+json" {
 				t.Errorf("content type = %q", got)
@@ -208,14 +200,10 @@ func TestHandleHidesRepositoryErrorDetails(t *testing.T) {
 
 	recorder := serve(handler, validBody, generated.CreateTripParams{})
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", recorder.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
 
 	for _, leaked := range []string{"hunter2", "10.0.0.5", "SQLSTATE", "connection"} {
-		if strings.Contains(recorder.Body.String(), leaked) {
-			t.Errorf("response leaks %q: %s", leaked, recorder.Body.String())
-		}
+		assert.NotContains(t, recorder.Body.String(), leaked, "response leaks %q: %s", leaked, recorder.Body.String())
 	}
 
 	if problem := decodeProblem(t, recorder); problem.Code != "internal_error" {

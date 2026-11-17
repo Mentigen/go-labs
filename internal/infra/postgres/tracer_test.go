@@ -6,6 +6,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
@@ -29,9 +31,7 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 	})
 
 	tracer, err := postgres.NewQueryTracer(tp, mp)
-	if err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, err)
 
 	ctx, parent := tp.Tracer("test").Start(context.Background(), "request")
 	defer parent.End()
@@ -39,15 +39,11 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 	tracer.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: &pgconn.PgError{Code: "23505"}})
 
 	spans := exporter.GetSpans()
-	if len(spans) != 1 {
-		t.Fatalf("DB spans = %d, want 1", len(spans))
-	}
+	require.Len(t, spans, 1, "DB spans = %d, want 1", len(spans))
 	span := spans[0]
 	attrs := attribute.NewSet(span.Attributes...)
 	assertQueryAttributes(t, attrs)
-	if span.Status.Code != codes.Error || !span.Parent.Equal(parent.SpanContext()) {
-		t.Errorf("DB span must be an error under the request: %+v", span)
-	}
+	assert.False(t, span.Status.Code != codes.Error || !span.Parent.Equal(parent.SpanContext()), "DB span must be an error under the request: %+v", span)
 
 	var metrics metricdata.ResourceMetrics
 	if err := reader.Collect(context.Background(), &metrics); err != nil {
@@ -59,18 +55,14 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 			if instrument.Name != "db.client.operation.duration" {
 				continue
 			}
-			if instrument.Unit != "s" {
-				t.Errorf("DB duration unit = %q, want seconds", instrument.Unit)
-			}
+			assert.Equal(t, "s", instrument.Unit, "DB duration unit = %q, want seconds", instrument.Unit)
 			for _, point := range instrument.Data.(metricdata.Histogram[float64]).DataPoints {
 				assertQueryAttributes(t, point.Attributes)
 				count += point.Count
 			}
 		}
 	}
-	if count != 1 {
-		t.Errorf("DB operations recorded = %d, want 1", count)
-	}
+	assert.Equal(t, uint64(1), count, "DB operations recorded = %d, want 1", count)
 }
 
 func assertQueryAttributes(t *testing.T, attrs attribute.Set) {
@@ -81,8 +73,6 @@ func assertQueryAttributes(t *testing.T, attrs attribute.Set) {
 		"error.type":         "23505",
 	} {
 		value, ok := attrs.Value(key)
-		if !ok || value.AsString() != want {
-			t.Errorf("%s = %v, want %q", key, value, want)
-		}
+		assert.False(t, !ok || value.AsString() != want, "%s = %v, want %q", key, value, want)
 	}
 }

@@ -8,10 +8,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	tripdomain "github.com/Mentigen/go-labs/internal/domain/trip"
@@ -41,18 +42,14 @@ func TestHandleReturnsTrip(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{ID: tripID, Status: tripdomain.StatusActive, Price: 700}, nil)
 
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", recorder.Code)
-	}
+	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
 
 	var body generated.Trip
 	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode body: %v", err)
 	}
 
-	if body.Id != tripID || body.Price != 700 {
-		t.Errorf("unexpected body: %+v", body)
-	}
+	assert.False(t, body.Id != tripID || body.Price != 700, "unexpected body: %+v", body)
 }
 
 func TestHandleTripNotFound(t *testing.T) {
@@ -60,18 +57,14 @@ func TestHandleTripNotFound(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{}, tripdomain.ErrTripNotFound)
 
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404", recorder.Code)
-	}
+	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
 
 	var problem generated.Problem
 	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
 		t.Fatalf("decode problem: %v", err)
 	}
 
-	if problem.Code != "trip_not_found" {
-		t.Errorf("code = %q, want trip_not_found", problem.Code)
-	}
+	assert.Equal(t, "trip_not_found", problem.Code, "code = %q, want trip_not_found", problem.Code)
 }
 
 func TestHandleHidesInternalErrorDetails(t *testing.T) {
@@ -79,11 +72,8 @@ func TestHandleHidesInternalErrorDetails(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{}, errors.New("pq: password authentication failed for user tripgo"))
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("status = %d, want 500", recorder.Code)
-	}
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
 
-	if strings.Contains(recorder.Body.String(), "password") || strings.Contains(recorder.Body.String(), "tripgo\"") {
-		t.Errorf("response leaks internal details: %s", recorder.Body.String())
-	}
+	assert.NotContains(t, recorder.Body.String(), "password")
+	assert.NotContains(t, recorder.Body.String(), "tripgo\"")
 }
