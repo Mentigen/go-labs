@@ -36,13 +36,17 @@ func TestNew(t *testing.T) {
 	created, err := trip.New(tripID, now, validParams())
 	require.NoError(t, err, "unexpected error: %v", err)
 
-	assert.False(t, created.ID != tripID || created.UserID != userID || created.DriverID != driverID, "identifiers were not copied: %+v", created)
+	assert.Equal(t, tripID, created.ID)
+	assert.Equal(t, userID, created.UserID)
+	assert.Equal(t, driverID, created.DriverID)
 
 	assert.Equal(t, trip.StatusActive, created.Status, "status = %q, want %q", created.Status, trip.StatusActive)
 
 	assert.Nil(t, created.FinishedAt, "finished_at = %v, want nil", created.FinishedAt)
 
-	assert.False(t, !created.StartedAt.Equal(now) || !created.CreatedAt.Equal(now) || !created.UpdatedAt.Equal(now), "timestamps must equal creation time: %+v", created)
+	assert.True(t, created.StartedAt.Equal(now))
+	assert.True(t, created.CreatedAt.Equal(now))
+	assert.True(t, created.UpdatedAt.Equal(now))
 }
 
 func TestNewValidation(t *testing.T) {
@@ -88,8 +92,9 @@ func TestNewBoundaryValuesAreValid(t *testing.T) {
 	params.EndPoint = trip.Coordinates{Latitude: 90, Longitude: 180}
 	params.Price = 0
 
-	if _, err := trip.New(tripID, now, params); err != nil {
-		t.Fatalf("boundary values must be valid: %v", err)
+	{
+		_, err := trip.New(tripID, now, params)
+		require.NoError(t, err)
 	}
 }
 
@@ -129,7 +134,8 @@ func TestFinish(t *testing.T) {
 
 			assert.Equal(t, trip.StatusCompleted, current.Status, "status = %q, want %q", current.Status, trip.StatusCompleted)
 
-			assert.False(t, current.FinishedAt == nil || !current.FinishedAt.Equal(test.wantAt), "finished_at = %v, want %v", current.FinishedAt, test.wantAt)
+			require.NotNil(t, current.FinishedAt)
+			assert.True(t, current.FinishedAt.Equal(test.wantAt))
 
 			assert.True(t, current.UpdatedAt.Equal(test.wantAt), "updated_at = %v, want %v", current.UpdatedAt, test.wantAt)
 		})
@@ -141,7 +147,8 @@ func TestValidationErrorMessage(t *testing.T) {
 
 	err := trip.NewValidationError("price", "must not be negative")
 
-	if got, want := err.Error(), "invalid price: must not be negative"; got != want {
-		t.Errorf("message = %q, want %q", got, want)
+	{
+		got, want := err.Error(), "invalid price: must not be negative"
+		assert.Equal(t, want, got)
 	}
 }

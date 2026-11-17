@@ -43,12 +43,11 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 	span := spans[0]
 	attrs := attribute.NewSet(span.Attributes...)
 	assertQueryAttributes(t, attrs)
-	assert.False(t, span.Status.Code != codes.Error || !span.Parent.Equal(parent.SpanContext()), "DB span must be an error under the request: %+v", span)
+	assert.Equal(t, codes.Error, span.Status.Code)
+	assert.True(t, span.Parent.Equal(parent.SpanContext()))
 
 	var metrics metricdata.ResourceMetrics
-	if err := reader.Collect(context.Background(), &metrics); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, reader.Collect(context.Background(), &metrics))
 	var count uint64
 	for _, scope := range metrics.ScopeMetrics {
 		for _, instrument := range scope.Metrics {
@@ -73,6 +72,7 @@ func assertQueryAttributes(t *testing.T, attrs attribute.Set) {
 		"error.type":         "23505",
 	} {
 		value, ok := attrs.Value(key)
-		assert.False(t, !ok || value.AsString() != want, "%s = %v, want %q", key, value, want)
+		assert.True(t, ok)
+		assert.Equal(t, want, value.AsString())
 	}
 }

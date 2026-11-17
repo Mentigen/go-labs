@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
 	"github.com/Mentigen/go-labs/internal/infra/telemetry"
@@ -18,9 +19,7 @@ func decode(t *testing.T, buffer *bytes.Buffer) map[string]any {
 	t.Helper()
 
 	record := map[string]any{}
-	if err := json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &record); err != nil {
-		t.Fatalf("log line is not JSON: %q", buffer.String())
-	}
+	require.NoError(t, json.Unmarshal(bytes.TrimSpace(buffer.Bytes()), &record))
 
 	return record
 }
@@ -57,18 +56,21 @@ func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
 	record := decode(t, &buffer)
 
 	for _, field := range []string{"time", "level", "msg", "service"} {
-		if _, ok := record[field]; !ok {
-			t.Errorf("field %q is missing: %v", field, record)
+		{
+			_, ok := record[field]
+			assert.True(t, ok)
 		}
 	}
 
-	assert.False(t, record["service"] != "trip-service" || record["component"] != "test", "unexpected record: %v", record)
+	assert.Equal(t, "trip-service", record["service"])
+	assert.Equal(t, "test", record["component"])
 
-	if _, ok := record["trace_id"]; ok {
-		t.Errorf("trace_id must be absent outside a span: %v", record)
+	{
+		_, ok := record["trace_id"]
+		assert.False(t, ok)
 	}
 
-	assert.False(t, !strings.HasSuffix(record["time"].(string), "Z"), "time must be UTC, got %v", record["time"])
+	assert.True(t, strings.HasSuffix(record["time"].(string), "Z"))
 }
 
 func TestLoggerHonoursLevel(t *testing.T) {

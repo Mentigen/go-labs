@@ -61,9 +61,7 @@ func decodeProblem(t *testing.T, recorder *httptest.ResponseRecorder) generated.
 	t.Helper()
 
 	var problem generated.Problem
-	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
-		t.Fatalf("decode problem: %v (%s)", err, recorder.Body.String())
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
 
 	return problem
 }
@@ -95,16 +93,16 @@ func TestHandleCreatesTrip(t *testing.T) {
 
 	require.Equal(t, http.StatusCreated, recorder.Code, "status = %d, want 201: %s", recorder.Code, recorder.Body.String())
 
-	if got, want := recorder.Header().Get("Location"), "/api/v1/trips/"+tripID.String(); got != want {
-		t.Errorf("location = %q, want %q", got, want)
+	{
+		got, want := recorder.Header().Get("Location"), "/api/v1/trips/"+tripID.String()
+		assert.Equal(t, want, got)
 	}
 
 	var body generated.Trip
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 
-	assert.False(t, body.Id != tripID || body.Status != generated.TripStatus(tripdomain.StatusActive), "unexpected body: %+v", body)
+	assert.Equal(t, tripID, body.Id)
+	assert.Equal(t, generated.TripStatus(tripdomain.StatusActive), body.Status)
 }
 
 func TestHandlePassesIdempotencyKeyAndAnswers200OnReplay(t *testing.T) {
@@ -122,8 +120,9 @@ func TestHandlePassesIdempotencyKeyAndAnswers200OnReplay(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
 
-	if location := recorder.Header().Get("Location"); location != "" {
-		t.Errorf("replay must not set Location, got %q", location)
+	{
+		location := recorder.Header().Get("Location")
+		assert.Equal(t, "", location)
 	}
 }
 
@@ -153,8 +152,9 @@ func TestHandleMapsUsecaseErrors(t *testing.T) {
 
 			require.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d", recorder.Code, test.wantStatus)
 
-			if problem := decodeProblem(t, recorder); problem.Code != test.wantCode {
-				t.Errorf("code = %q, want %q", problem.Code, test.wantCode)
+			{
+				problem := decodeProblem(t, recorder)
+				assert.Equal(t, test.wantCode, problem.Code)
 			}
 		})
 	}
@@ -178,12 +178,14 @@ func TestHandleRejectsMalformedBody(t *testing.T) {
 
 			require.Equal(t, http.StatusBadRequest, recorder.Code, "status = %d, want 400", recorder.Code)
 
-			if got := recorder.Header().Get("Content-Type"); got != "application/problem+json" {
-				t.Errorf("content type = %q", got)
+			{
+				got := recorder.Header().Get("Content-Type")
+				assert.Equal(t, "application/problem+json", got)
 			}
 
-			if problem := decodeProblem(t, recorder); problem.Code != "invalid_request" {
-				t.Errorf("code = %q, want invalid_request", problem.Code)
+			{
+				problem := decodeProblem(t, recorder)
+				assert.Equal(t, "invalid_request", problem.Code)
 			}
 		})
 	}
@@ -206,7 +208,8 @@ func TestHandleHidesRepositoryErrorDetails(t *testing.T) {
 		assert.NotContains(t, recorder.Body.String(), leaked, "response leaks %q: %s", leaked, recorder.Body.String())
 	}
 
-	if problem := decodeProblem(t, recorder); problem.Code != "internal_error" {
-		t.Errorf("code = %q, want internal_error", problem.Code)
+	{
+		problem := decodeProblem(t, recorder)
+		assert.Equal(t, "internal_error", problem.Code)
 	}
 }

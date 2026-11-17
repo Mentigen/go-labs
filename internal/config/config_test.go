@@ -2,7 +2,6 @@ package config_test
 
 import (
 	"log/slog"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -82,7 +81,8 @@ func TestLoadFailsFast(t *testing.T) {
 			}
 
 			_, err := config.Load()
-			require.False(t, err == nil || !strings.Contains(err.Error(), test.wantErr), "error = %v, want mention of %s", err, test.wantErr)
+			require.Error(t, err)
+			require.Contains(t, err.Error(), test.wantErr)
 		})
 	}
 }

@@ -88,8 +88,9 @@ func newTrip(t *testing.T) tripdomain.Trip {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		if _, err := pool.Exec(ctx, `DELETE FROM trips WHERE id = $1`, created.ID); err != nil {
-			t.Errorf("cleanup trip %s: %v", created.ID, err)
+		{
+			_, err := pool.Exec(ctx, `DELETE FROM trips WHERE id = $1`, created.ID)
+			assert.NoError(t, err)
 		}
 	})
 
@@ -101,18 +102,19 @@ func TestSaveAndGetByID(t *testing.T) {
 	ctx := context.Background()
 	want := newTrip(t)
 
-	if err := e.repository.Save(ctx, want); err != nil {
-		t.Fatalf("save: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, want))
 
 	got, err := e.repository.GetByID(ctx, want.ID)
 	require.NoError(t, err, "get: %v", err)
 
-	if got.ID != want.ID || got.UserID != want.UserID || got.DriverID != want.DriverID ||
-		got.StartPoint != want.StartPoint || got.EndPoint != want.EndPoint ||
-		got.Price != want.Price || got.Status != tripdomain.StatusActive || got.FinishedAt != nil {
-		t.Errorf("round trip mismatch:\n got %+v\nwant %+v", got, want)
-	}
+	assert.Equal(t, want.ID, got.ID)
+	assert.Equal(t, want.UserID, got.UserID)
+	assert.Equal(t, want.DriverID, got.DriverID)
+	assert.Equal(t, want.StartPoint, got.StartPoint)
+	assert.Equal(t, want.EndPoint, got.EndPoint)
+	assert.Equal(t, want.Price, got.Price)
+	assert.Equal(t, tripdomain.StatusActive, got.Status)
+	assert.Nil(t, got.FinishedAt)
 }
 
 func TestGetByIDMissingTrip(t *testing.T) {
@@ -130,13 +132,9 @@ func TestSecondActiveTripOfTheSameDriverIsRejected(t *testing.T) {
 	second := newTrip(t)
 	second.DriverID = first.DriverID
 
-	if err := e.repository.Save(ctx, first); err != nil {
-		t.Fatalf("save first: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, first))
 
-	if err := e.repository.Save(ctx, second); !errors.Is(err, tripdomain.ErrDriverBusy) {
-		t.Fatalf("error = %v, want ErrDriverBusy", err)
-	}
+	require.ErrorIs(t, e.repository.Save(ctx, second), tripdomain.ErrDriverBusy)
 }
 
 func TestDriverIsFreeAfterTheTripIsFinished(t *testing.T) {
@@ -147,21 +145,13 @@ func TestDriverIsFreeAfterTheTripIsFinished(t *testing.T) {
 	second := newTrip(t)
 	second.DriverID = first.DriverID
 
-	if err := e.repository.Save(ctx, first); err != nil {
-		t.Fatalf("save first: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, first))
 
-	if err := first.Finish(time.Now().UTC()); err != nil {
-		t.Fatalf("finish in domain: %v", err)
-	}
+	require.NoError(t, first.Finish(time.Now().UTC()))
 
-	if err := e.repository.Finish(ctx, first); err != nil {
-		t.Fatalf("finish in repository: %v", err)
-	}
+	require.NoError(t, e.repository.Finish(ctx, first))
 
-	if err := e.repository.Save(ctx, second); err != nil {
-		t.Fatalf("a finished trip must free the driver: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, second))
 }
 
 func TestFinishIsConditionalOnActiveStatus(t *testing.T) {
@@ -169,27 +159,21 @@ func TestFinishIsConditionalOnActiveStatus(t *testing.T) {
 	ctx := context.Background()
 
 	stored := newTrip(t)
-	if err := e.repository.Save(ctx, stored); err != nil {
-		t.Fatalf("save: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, stored))
 
 	finishedAt := time.Now().UTC().Truncate(time.Microsecond)
-	if err := stored.Finish(finishedAt); err != nil {
-		t.Fatalf("finish in domain: %v", err)
-	}
+	require.NoError(t, stored.Finish(finishedAt))
 
-	if err := e.repository.Finish(ctx, stored); err != nil {
-		t.Fatalf("first finish: %v", err)
-	}
+	require.NoError(t, e.repository.Finish(ctx, stored))
 
-	if err := e.repository.Finish(ctx, stored); !errors.Is(err, tripdomain.ErrTripCompleted) {
-		t.Fatalf("second finish error = %v, want ErrTripCompleted", err)
-	}
+	require.ErrorIs(t, e.repository.Finish(ctx, stored), tripdomain.ErrTripCompleted)
 
 	got, err := e.repository.GetByID(ctx, stored.ID)
 	require.NoError(t, err, "get: %v", err)
 
-	assert.False(t, got.Status != tripdomain.StatusCompleted || got.FinishedAt == nil || !got.FinishedAt.Equal(finishedAt), "unexpected stored trip: %+v", got)
+	assert.Equal(t, tripdomain.StatusCompleted, got.Status)
+	require.NotNil(t, got.FinishedAt)
+	assert.True(t, got.FinishedAt.Equal(finishedAt))
 }
 
 func TestTransactionCommitsBothTables(t *testing.T) {
@@ -206,12 +190,14 @@ func TestTransactionCommitsBothTables(t *testing.T) {
 	})
 	require.NoError(t, err, "transaction: %v", err)
 
-	if got := historyRows(t, stored.ID); got != 1 {
-		t.Errorf("history rows = %d, want 1", got)
+	{
+		got := historyRows(t, stored.ID)
+		assert.EqualValues(t, 1, got)
 	}
 
-	if _, err := e.repository.GetByID(ctx, stored.ID); err != nil {
-		t.Errorf("trip must be committed: %v", err)
+	{
+		_, err := e.repository.GetByID(ctx, stored.ID)
+		assert.NoError(t, err)
 	}
 }
 
@@ -233,12 +219,14 @@ func TestTransactionRollsBackBothTablesOnError(t *testing.T) {
 	})
 	require.Error(t, err, "expected the transaction to fail on the history row with an unknown trip")
 
-	if _, err := e.repository.GetByID(ctx, stored.ID); !errors.Is(err, tripdomain.ErrTripNotFound) {
-		t.Errorf("trip must be rolled back, got %v", err)
+	{
+		_, err := e.repository.GetByID(ctx, stored.ID)
+		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 	}
 
-	if got := historyRows(t, stored.ID); got != 0 {
-		t.Errorf("history rows = %d after rollback, want 0", got)
+	{
+		got := historyRows(t, stored.ID)
+		assert.EqualValues(t, 0, got)
 	}
 }
 
@@ -259,8 +247,9 @@ func TestTransactionRollsBackOnPanic(t *testing.T) {
 		})
 	}()
 
-	if _, err := e.repository.GetByID(ctx, stored.ID); !errors.Is(err, tripdomain.ErrTripNotFound) {
-		t.Errorf("trip must be rolled back after a panic, got %v", err)
+	{
+		_, err := e.repository.GetByID(ctx, stored.ID)
+		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 	}
 }
 
@@ -276,24 +265,31 @@ func TestIdempotencyKeyLifecycle(t *testing.T) {
 
 	err := e.txManager.Do(ctx, func(ctx context.Context) error {
 		claimed, err := e.repository.ClaimIdempotencyKey(ctx, key, "hash-1", stored.ID, time.Hour)
-		assert.False(t, err != nil || !claimed, "first claim = %v, %v; want true, nil", claimed, err)
+		assert.NoError(t, err)
+		assert.True(t, claimed)
 
 		return e.repository.Save(ctx, stored)
 	})
 	require.NoError(t, err, "claim and save: %v", err)
 
 	record, found, err := e.repository.GetIdempotencyKey(ctx, key, time.Hour)
-	require.False(t, err != nil || !found || record.RequestHash != "hash-1" || record.TripID != stored.ID, "lookup = %+v, %v, %v", record, found, err)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, "hash-1", record.RequestHash)
+	require.Equal(t, stored.ID, record.TripID)
 
 	claimed, err := e.repository.ClaimIdempotencyKey(ctx, key, "hash-2", stored.ID, time.Hour)
-	assert.False(t, err != nil || claimed, "a live key must not be claimed again, got %v, %v", claimed, err)
+	assert.NoError(t, err)
+	assert.False(t, claimed)
 
-	if _, found, _ := e.repository.GetIdempotencyKey(ctx, key, -time.Hour); found {
-		t.Error("a key older than the ttl must be invisible")
+	{
+		_, found, _ := e.repository.GetIdempotencyKey(ctx, key, -time.Hour)
+		assert.False(t, found)
 	}
 
 	claimed, err = e.repository.ClaimIdempotencyKey(ctx, key, "hash-3", stored.ID, -time.Hour)
-	assert.False(t, err != nil || !claimed, "an expired key must be taken over, got %v, %v", claimed, err)
+	assert.NoError(t, err)
+	assert.True(t, claimed)
 }
 
 func TestCountActive(t *testing.T) {
@@ -303,14 +299,12 @@ func TestCountActive(t *testing.T) {
 	before, err := e.repository.CountActive(ctx)
 	require.NoError(t, err, "count: %v", err)
 
-	if err := e.repository.Save(ctx, newTrip(t)); err != nil {
-		t.Fatalf("save: %v", err)
-	}
+	require.NoError(t, e.repository.Save(ctx, newTrip(t)))
 
 	after, err := e.repository.CountActive(ctx)
 	require.NoError(t, err, "count: %v", err)
 
-	assert.False(t, after < before+1, "active trips: before %d, after %d", before, after)
+	assert.GreaterOrEqual(t, after, before+1)
 }
 
 func historyRows(t *testing.T, tripID uuid.UUID) int {
@@ -329,9 +323,7 @@ func TestConcurrentFinishCommitsExactlyOneHistoryRow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	stored := newTrip(t)
-	if err := e.repository.Save(ctx, stored); err != nil {
-		t.Fatal(err)
-	}
+	require.NoError(t, e.repository.Save(ctx, stored))
 
 	ready := make(chan struct{}, 2)
 	start := make(chan struct{})
@@ -363,7 +355,7 @@ func TestConcurrentFinishCommitsExactlyOneHistoryRow(t *testing.T) {
 		select {
 		case <-ready:
 		case <-ctx.Done():
-			t.Fatal("concurrent transactions did not read the trip in time")
+			require.Fail(t, "concurrent transactions did not read the trip in time")
 		}
 	}
 	close(start)
@@ -376,10 +368,12 @@ func TestConcurrentFinishCommitsExactlyOneHistoryRow(t *testing.T) {
 		case errors.Is(err, tripdomain.ErrTripCompleted):
 			conflicted++
 		default:
-			t.Errorf("unexpected finish error: %v", err)
+			assert.NoError(t, err, "unexpected finish error")
 		}
 	}
-	assert.False(t, succeeded != 1 || conflicted != 1 || historyRows(t, stored.ID) != 1, "successes = %d, conflicts = %d, want one of each and one history row", succeeded, conflicted)
+	assert.EqualValues(t, 1, succeeded)
+	assert.EqualValues(t, 1, conflicted)
+	assert.EqualValues(t, 1, historyRows(t, stored.ID))
 }
 
 func TestTransactionBeginHasTimeoutWhenPoolIsExhausted(t *testing.T) {
@@ -398,7 +392,7 @@ func TestTransactionBeginHasTimeoutWhenPoolIsExhausted(t *testing.T) {
 
 	manager := transaction.NewManager(limitedPool, noop.NewTracerProvider().Tracer("test"), 25*time.Millisecond)
 	err = manager.Do(ctx, func(context.Context) error {
-		t.Error("transaction callback must not run without a connection")
+		assert.Fail(t, "transaction callback must not run without a connection")
 		return nil
 	})
 	require.ErrorIs(t, err, context.DeadlineExceeded)
@@ -411,8 +405,9 @@ func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := e.txManager.Do(ctx, func(ctx context.Context) error {
-		if _, ok := ctx.Deadline(); !ok {
-			t.Error("transaction must carry a deadline through commit")
+		{
+			_, ok := ctx.Deadline()
+			assert.True(t, ok)
 		}
 		if err := e.repository.Save(ctx, stored); err != nil {
 			return err
@@ -424,8 +419,9 @@ func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, context.Canceled, "commit error = %v, want context.Canceled", err)
-	if _, err := e.repository.GetByID(context.Background(), stored.ID); !errors.Is(err, tripdomain.ErrTripNotFound) {
-		t.Errorf("trip must not survive a canceled commit: %v", err)
+	{
+		_, err := e.repository.GetByID(context.Background(), stored.ID)
+		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 	}
-	assert.False(t, historyRows(t, stored.ID) != 0, "history must not survive a canceled commit")
+	assert.EqualValues(t, 0, historyRows(t, stored.ID))
 }

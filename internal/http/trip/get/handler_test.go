@@ -45,11 +45,10 @@ func TestHandleReturnsTrip(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
 
 	var body generated.Trip
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 
-	assert.False(t, body.Id != tripID || body.Price != 700, "unexpected body: %+v", body)
+	assert.Equal(t, tripID, body.Id)
+	assert.EqualValues(t, 700, body.Price)
 }
 
 func TestHandleTripNotFound(t *testing.T) {
@@ -60,9 +59,7 @@ func TestHandleTripNotFound(t *testing.T) {
 	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
 
 	var problem generated.Problem
-	if err := json.Unmarshal(recorder.Body.Bytes(), &problem); err != nil {
-		t.Fatalf("decode problem: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
 
 	assert.Equal(t, "trip_not_found", problem.Code, "code = %q, want trip_not_found", problem.Code)
 }

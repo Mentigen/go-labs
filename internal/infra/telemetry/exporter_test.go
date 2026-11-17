@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 	"go.uber.org/mock/gomock"
 )
@@ -21,12 +22,12 @@ func TestSpanExportFailureIsHandledLocally(t *testing.T) {
 	backend.EXPECT().Shutdown(ctx).Return(failure)
 	var reported error
 	exporter := bestEffortSpanExporter{SpanExporter: backend, report: func(err error) { reported = err }}
-	if err := exporter.ExportSpans(ctx, nil); err != nil || !errors.Is(reported, failure) {
-		t.Fatalf("background failure must be reported locally: returned=%v reported=%v", err, reported)
+	{
+		err := exporter.ExportSpans(ctx, nil)
+		require.NoError(t, err)
+		require.ErrorIs(t, reported, failure)
 	}
-	if err := exporter.Shutdown(ctx); !errors.Is(err, failure) {
-		t.Fatalf("shutdown must preserve failure: %v", err)
-	}
+	require.ErrorIs(t, exporter.Shutdown(ctx), failure)
 }
 
 func TestMetricExportFailureIsHandledLocally(t *testing.T) {
@@ -40,13 +41,11 @@ func TestMetricExportFailureIsHandledLocally(t *testing.T) {
 	backend.EXPECT().Shutdown(ctx).Return(failure)
 	var reported error
 	exporter := bestEffortMetricExporter{Exporter: backend, report: func(err error) { reported = err }}
-	if err := exporter.Export(ctx, metrics); err != nil || !errors.Is(reported, failure) {
-		t.Fatalf("background failure must be reported locally: returned=%v reported=%v", err, reported)
+	{
+		err := exporter.Export(ctx, metrics)
+		require.NoError(t, err)
+		require.ErrorIs(t, reported, failure)
 	}
-	if err := exporter.ForceFlush(ctx); !errors.Is(err, failure) {
-		t.Fatalf("flush must preserve failure: %v", err)
-	}
-	if err := exporter.Shutdown(ctx); !errors.Is(err, failure) {
-		t.Fatalf("shutdown must preserve failure: %v", err)
-	}
+	require.ErrorIs(t, exporter.ForceFlush(ctx), failure)
+	require.ErrorIs(t, exporter.Shutdown(ctx), failure)
 }

@@ -49,15 +49,19 @@ func TestProblem(t *testing.T) {
 
 			status, body := domainerror.Problem(test.err)
 
-			assert.False(t, status != test.wantStatus || int(body.Status) != test.wantStatus, "status = %d (body %d), want %d", status, body.Status, test.wantStatus)
+			assert.Equal(t, test.wantStatus, status)
+			assert.Equal(t, test.wantStatus, int(body.Status))
 
 			assert.Equal(t, test.wantCode, body.Code, "code = %q, want %q", body.Code, test.wantCode)
 
-			if want := "https://tripgo.example/problems/" + test.wantType; body.Type != want {
-				t.Errorf("type = %q, want %q", body.Type, want)
+			{
+				want := "https://tripgo.example/problems/" + test.wantType
+				assert.Equal(t, want, body.Type)
 			}
 
-			assert.False(t, body.Title == "" || body.Detail == nil || *body.Detail == "", "title and detail must be filled: %+v", body)
+			assert.NotEqual(t, "", body.Title)
+			require.NotNil(t, body.Detail)
+			assert.NotEqual(t, "", *body.Detail)
 		})
 	}
 }
@@ -67,7 +71,8 @@ func TestProblemKeepsValidationDetails(t *testing.T) {
 
 	_, body := domainerror.Problem(trip.NewValidationError("start_point.latitude", "must be between -90 and 90"))
 
-	assert.False(t, body.Detail == nil || !strings.Contains(*body.Detail, "start_point.latitude"), "detail must name the failing field, got %v", body.Detail)
+	require.NotNil(t, body.Detail)
+	assert.Contains(t, *body.Detail, "start_point.latitude")
 }
 
 func TestProblemHidesInternalDetails(t *testing.T) {
@@ -98,21 +103,22 @@ func TestWriteSetsHeadersInstanceAndLogsServerErrorsOnce(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
 
-	if got := recorder.Header().Get("Content-Type"); got != "application/problem+json" {
-		t.Errorf("content type = %q", got)
+	{
+		got := recorder.Header().Get("Content-Type")
+		assert.Equal(t, "application/problem+json", got)
 	}
 
 	var body generated.Problem
-	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode body: %v", err)
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 
-	assert.False(t, body.Instance == nil || *body.Instance != "/api/v1/trips/abc", "instance = %v", body.Instance)
+	require.NotNil(t, body.Instance)
+	assert.Equal(t, "/api/v1/trips/abc", *body.Instance)
 
 	assert.NotContains(t, recorder.Body.String(), "database exploded", "response leaks the internal error: %s", recorder.Body.String())
 
-	if got := strings.Count(logs.String(), "database exploded"); got != 1 {
-		t.Errorf("internal error logged %d times, want 1", got)
+	{
+		got := strings.Count(logs.String(), "database exploded")
+		assert.EqualValues(t, 1, got)
 	}
 }
 
