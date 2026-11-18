@@ -22,11 +22,9 @@ func TestSpanExportFailureIsHandledLocally(t *testing.T) {
 	backend.EXPECT().Shutdown(ctx).Return(failure)
 	var reported error
 	exporter := bestEffortSpanExporter{SpanExporter: backend, report: func(err error) { reported = err }}
-	{
-		err := exporter.ExportSpans(ctx, nil)
-		require.NoError(t, err)
-		require.ErrorIs(t, reported, failure)
-	}
+	err := exporter.ExportSpans(ctx, nil)
+	require.NoError(t, err)
+	require.ErrorIs(t, reported, failure)
 	require.ErrorIs(t, exporter.Shutdown(ctx), failure)
 }
 
@@ -41,11 +39,9 @@ func TestMetricExportFailureIsHandledLocally(t *testing.T) {
 	backend.EXPECT().Shutdown(ctx).Return(failure)
 	var reported error
 	exporter := bestEffortMetricExporter{Exporter: backend, report: func(err error) { reported = err }}
-	{
-		err := exporter.Export(ctx, metrics)
-		require.NoError(t, err)
-		require.ErrorIs(t, reported, failure)
-	}
+	err := exporter.Export(ctx, metrics)
+	require.NoError(t, err)
+	require.ErrorIs(t, reported, failure)
 	require.ErrorIs(t, exporter.ForceFlush(ctx), failure)
 	require.ErrorIs(t, exporter.Shutdown(ctx), failure)
 }

@@ -39,9 +39,9 @@ func TestLoggerAddsTraceIdentifiersInsideSpan(t *testing.T) {
 
 	record := decode(t, &buffer)
 
-	assert.Equal(t, span.SpanContext().TraceID().String(), record["trace_id"], "trace_id = %v, want %v", record["trace_id"], span.SpanContext().TraceID())
+	assert.Equal(t, span.SpanContext().TraceID().String(), record["trace_id"])
 
-	assert.Equal(t, span.SpanContext().SpanID().String(), record["span_id"], "span_id = %v, want %v", record["span_id"], span.SpanContext().SpanID())
+	assert.Equal(t, span.SpanContext().SpanID().String(), record["span_id"])
 }
 
 func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
@@ -56,19 +56,13 @@ func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
 	record := decode(t, &buffer)
 
 	for _, field := range []string{"time", "level", "msg", "service"} {
-		{
-			_, ok := record[field]
-			assert.True(t, ok)
-		}
+		assert.Contains(t, record, field)
 	}
 
 	assert.Equal(t, "trip-service", record["service"])
 	assert.Equal(t, "test", record["component"])
 
-	{
-		_, ok := record["trace_id"]
-		assert.False(t, ok)
-	}
+	assert.NotContains(t, record, "trace_id")
 
 	assert.True(t, strings.HasSuffix(record["time"].(string), "Z"))
 }

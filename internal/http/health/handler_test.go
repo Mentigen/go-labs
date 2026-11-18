@@ -23,7 +23,7 @@ func TestHealthDoesNotTouchTheDatabase(t *testing.T) {
 
 	handler.Health(recorder, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
-	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code)
 }
 
 func TestReady(t *testing.T) {
@@ -52,7 +52,7 @@ func TestReady(t *testing.T) {
 				httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/ready", nil),
 			)
 
-			assert.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d", recorder.Code, test.wantStatus)
+			assert.Equal(t, test.wantStatus, recorder.Code)
 		})
 	}
 }

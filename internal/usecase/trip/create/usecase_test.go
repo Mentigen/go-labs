@@ -28,6 +28,162 @@ var (
 	errStorage = errors.New("storage is down")
 )
 
+func TestCreateTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		setup   func(*fixture)
+		want    model.CreateTripResult
+		wantErr error
+	}{
+		{
+			name: "new trip",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).Return(nil)
+				f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(nil)
+				f.expectCreationEvents()
+			},
+			want: model.CreateTripResult{Trip: expectedTrip(), Created: true},
+		},
+		{
+			name: "driver already has an active trip",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).Return(tripdomain.ErrDriverBusy)
+			},
+			wantErr: tripdomain.ErrDriverBusy,
+		},
+		{
+			name: "cannot save history",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).Return(nil)
+				f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(errStorage)
+			},
+			wantErr: errStorage,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.expectTransaction()
+			tt.setup(f)
+
+			got, err := f.usecase.Execute(context.Background(), validInput())
+			require.ErrorIs(t, err, tt.wantErr)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestCreateRejectsNegativePrice(t *testing.T) {
+	f := newFixture(t)
+	input := validInput()
+	input.Price = -10
+
+	got, err := f.usecase.Execute(context.Background(), input)
+	var validation *tripdomain.ValidationError
+	require.ErrorAs(t, err, &validation)
+	assert.Equal(t, "price", validation.Field)
+	assert.Empty(t, got)
+}
+
+func TestCreateWithIdempotencyKey(t *testing.T) {
+	input := validInput()
+	input.IdempotencyKey = &key
+	params := tripdomain.NewParams{
+		UserID: input.UserID, DriverID: input.DriverID, StartPoint: input.StartPoint,
+		EndPoint: input.EndPoint, Price: input.Price,
+	}
+	existing := tripdomain.Trip{
+		ID:     uuid.MustParse("55555555-5555-5555-5555-555555555555"),
+		Status: tripdomain.StatusCompleted, FinishedAt: &now,
+	}
+	record := model.IdempotencyRecord{RequestHash: "fingerprint", TripID: existing.ID}
+	tests := []struct {
+		name       string
+		setup      func(*fixture)
+		want       model.CreateTripResult
+		checkError assert.ErrorAssertionFunc
+	}{
+		{
+			name: "first request creates a trip",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil)
+				f.expectTransaction()
+				claim := f.repository.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, record.RequestHash, tripID, idempotencyTTL).Return(true, nil)
+				f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).After(claim).Return(nil)
+				f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(nil)
+				f.expectCreationEvents()
+			},
+			want:       model.CreateTripResult{Trip: expectedTrip(), Created: true},
+			checkError: assert.NoError,
+		},
+		{
+			name: "retry returns the existing trip even after it finished",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(record, true, nil)
+				f.repository.EXPECT().GetByID(gomock.Any(), existing.ID).Return(existing, nil)
+			},
+			want:       model.CreateTripResult{Trip: existing},
+			checkError: assert.NoError,
+		},
+		{
+			name: "same key with a different body",
+			setup: func(f *fixture) {
+				other := model.IdempotencyRecord{TripID: tripID, RequestHash: "other"}
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(other, true, nil)
+			},
+			checkError: func(t assert.TestingT, err error, _ ...any) bool {
+				return assert.ErrorIs(t, err, tripdomain.ErrIdempotencyConflict)
+			},
+		},
+		{
+			name: "cannot look up the key",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, errStorage)
+			},
+			checkError: func(t assert.TestingT, err error, _ ...any) bool {
+				return assert.ErrorIs(t, err, errStorage)
+			},
+		},
+		{
+			name: "concurrent request claims the key first",
+			setup: func(f *fixture) {
+				f.expectLostClaim()
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(record, true, nil)
+				f.repository.EXPECT().GetByID(gomock.Any(), existing.ID).Return(existing, nil)
+			},
+			want:       model.CreateTripResult{Trip: existing},
+			checkError: assert.NoError,
+		},
+		{
+			name: "key disappeared after a concurrent claim",
+			setup: func(f *fixture) {
+				f.expectLostClaim()
+				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil)
+			},
+			checkError: assert.Error,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.hasher.EXPECT().Params(params).Return(record.RequestHash)
+			tt.setup(f)
+
+			got, err := f.usecase.Execute(context.Background(), input)
+			tt.checkError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func (f *fixture) expectLostClaim() {
+	f.expectTransaction()
+	gomock.InOrder(
+		f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil),
+		f.repository.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, "fingerprint", tripID, idempotencyTTL).Return(false, nil),
+	)
+}
+
 type fixture struct {
 	hasher     *MockrequestHasher
 	logger     *Mocklogger
@@ -50,13 +206,6 @@ func newFixture(t *testing.T) *fixture {
 		metrics:    NewMockmetrics(ctrl),
 	}
 
-	f.txManager.EXPECT().
-		Do(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, fn func(context.Context) error) error {
-			return fn(ctx)
-		}).
-		AnyTimes()
-
 	f.usecase = create.New(
 		f.repository,
 		f.hasher,
@@ -70,6 +219,14 @@ func newFixture(t *testing.T) *fixture {
 	return f
 }
 
+func (f *fixture) expectTransaction() {
+	f.txManager.EXPECT().
+		Do(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, fn func(context.Context) error) error {
+			return fn(ctx)
+		})
+}
+
 func validInput() model.CreateTripInput {
 	return model.CreateTripInput{
 		UserID:     userID,
@@ -81,112 +238,15 @@ func validInput() model.CreateTripInput {
 }
 
 func expectedTrip() tripdomain.Trip {
+	in := validInput()
 	return tripdomain.Trip{
-		ID:         tripID,
-		UserID:     userID,
-		DriverID:   driverID,
-		StartPoint: tripdomain.Coordinates{Latitude: 55.75, Longitude: 37.61},
-		EndPoint:   tripdomain.Coordinates{Latitude: 55.80, Longitude: 37.70},
-		Price:      500,
-		Status:     tripdomain.StatusActive,
-		StartedAt:  now,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID: tripID, UserID: in.UserID, DriverID: in.DriverID, Price: in.Price,
+		StartPoint: in.StartPoint, EndPoint: in.EndPoint, Status: tripdomain.StatusActive,
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 }
 
-func TestExecute(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name           string
-		idempotent     bool
-		invalid        bool
-		setup          func(*fixture)
-		want           model.CreateTripResult
-		wantErr        error
-		wantValidation bool
-		wantAnyError   bool
-	}{
-		{name: "created", idempotent: false, setup: func(f *fixture) {
-			f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).Return(nil)
-			f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(nil)
-			f.metrics.EXPECT().TripCreated(gomock.Any())
-			f.logger.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", tripID.String())
-		}, want: model.CreateTripResult{Trip: expectedTrip(), Created: true}},
-		{name: "driver busy", idempotent: false, wantErr: tripdomain.ErrDriverBusy, setup: func(f *fixture) {
-			f.repository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(tripdomain.ErrDriverBusy)
-		}, want: model.CreateTripResult{}},
-		{name: "history failure", idempotent: false, wantErr: errStorage, setup: func(f *fixture) {
-			f.repository.EXPECT().Save(gomock.Any(), gomock.Any()).Return(nil)
-			f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(errStorage)
-		}, want: model.CreateTripResult{}},
-		{name: "invalid input", idempotent: false, invalid: true, wantValidation: true, setup: func(f *fixture) {
-		}, want: model.CreateTripResult{}},
-		{name: "first idempotent request", idempotent: true, setup: func(f *fixture) {
-			f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil)
-			f.repository.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, "fingerprint", tripID, idempotencyTTL).Return(true, nil)
-			f.repository.EXPECT().Save(gomock.Any(), expectedTrip()).Return(nil)
-			f.repository.EXPECT().AddCreatedHistory(gomock.Any(), tripID).Return(nil)
-			f.metrics.EXPECT().TripCreated(gomock.Any())
-			f.logger.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", tripID.String())
-		}, want: model.CreateTripResult{Trip: expectedTrip(), Created: true}},
-		{name: "replay completed trip", idempotent: true, setup: func(f *fixture) {
-			f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{RequestHash: "fingerprint", TripID: tripID}, true, nil)
-			f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(completedTrip(), nil)
-		}, want: model.CreateTripResult{Trip: completedTrip()}},
-		{name: "different body", idempotent: true, wantErr: tripdomain.ErrIdempotencyConflict, setup: func(f *fixture) {
-			f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{RequestHash: "other", TripID: tripID}, true, nil)
-		}, want: model.CreateTripResult{}},
-		{name: "lost claim replay", idempotent: true, setup: func(f *fixture) {
-			gomock.InOrder(
-				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil),
-				f.repository.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, "fingerprint", tripID, idempotencyTTL).Return(false, nil),
-				f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{RequestHash: "fingerprint", TripID: tripID}, true, nil),
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(expectedTrip(), nil),
-			)
-		}, want: model.CreateTripResult{Trip: expectedTrip()}},
-		{name: "key disappeared", idempotent: true, wantAnyError: true, setup: func(f *fixture) {
-			f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, nil).Times(2)
-			f.repository.EXPECT().ClaimIdempotencyKey(gomock.Any(), key, "fingerprint", tripID, idempotencyTTL).Return(false, nil)
-		}, want: model.CreateTripResult{}},
-		{name: "lookup failure", idempotent: true, wantErr: errStorage, setup: func(f *fixture) {
-			f.repository.EXPECT().GetIdempotencyKey(gomock.Any(), key, idempotencyTTL).Return(model.IdempotencyRecord{}, false, errStorage)
-		}, want: model.CreateTripResult{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			f := newFixture(t)
-			input := validInput()
-			if tt.invalid {
-				input.Price = -10
-			}
-			if tt.idempotent {
-				input.IdempotencyKey = &key
-				f.hasher.EXPECT().Params(tripdomain.NewParams{UserID: input.UserID, DriverID: input.DriverID, StartPoint: input.StartPoint, EndPoint: input.EndPoint, Price: input.Price}).Return("fingerprint")
-			}
-			tt.setup(f)
-			got, err := f.usecase.Execute(context.Background(), input)
-			switch {
-			case tt.wantValidation:
-				var validationError *tripdomain.ValidationError
-				require.ErrorAs(t, err, &validationError)
-				assert.Equal(t, "price", validationError.Field)
-			case tt.wantAnyError:
-				require.Error(t, err)
-			case tt.wantErr != nil:
-				require.ErrorIs(t, err, tt.wantErr)
-			default:
-				require.NoError(t, err)
-			}
-			assert.Equal(t, tt.want, got)
-		})
-	}
-}
-
-func completedTrip() tripdomain.Trip {
-	trip := expectedTrip()
-	trip.Status = tripdomain.StatusCompleted
-	trip.FinishedAt = &now
-	return trip
+func (f *fixture) expectCreationEvents() {
+	f.metrics.EXPECT().TripCreated(gomock.Any())
+	f.logger.EXPECT().InfoContext(gomock.Any(), "trip created", "trip_id", tripID.String())
 }

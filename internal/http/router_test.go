@@ -161,7 +161,7 @@ func TestValidRequestsPassThrough(t *testing.T) {
 
 			recorder := h.do(test.method, test.path, test.contentType, test.body)
 
-			require.Equal(t, test.want, recorder.Code, "status = %d, want %d: %s", recorder.Code, test.want, recorder.Body.String())
+			require.Equal(t, test.want, recorder.Code)
 		})
 	}
 }
@@ -200,17 +200,14 @@ func TestInvalidRequestsAreRejectedWithProblemJSON(t *testing.T) {
 
 			recorder := h.do(test.method, test.path, test.contentType, test.body)
 
-			require.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d: %s", recorder.Code, test.wantStatus, recorder.Body.String())
+			require.Equal(t, test.wantStatus, recorder.Code)
 
-			{
-				got := recorder.Header().Get("Content-Type")
-				assert.Equal(t, "application/problem+json", got)
-			}
+			assert.Equal(t, "application/problem+json", recorder.Header().Get("Content-Type"))
 
 			var problem generated.Problem
 			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
 
-			assert.Equal(t, test.wantCode, problem.Code, "code = %q, want %q", problem.Code, test.wantCode)
+			assert.Equal(t, test.wantCode, problem.Code)
 		})
 	}
 }
@@ -230,16 +227,13 @@ func TestPanicInHandlerIsRecovered(t *testing.T) {
 
 	recorder := h.do(http.MethodPost, tripsPath, contentTypeJSON, validBody)
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 
 	assert.NotContains(t, recorder.Body.String(), "nil pointer", "response leaks the panic value: %s", recorder.Body.String())
 
 	var problem generated.Problem
-	{
-		err := json.Unmarshal(recorder.Body.Bytes(), &problem)
-		assert.NoError(t, err)
-		assert.Equal(t, "internal_error", problem.Code)
-	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
+	assert.Equal(t, "internal_error", problem.Code)
 
 	records := decodeLogs(t, h.logs)
 
@@ -257,7 +251,7 @@ func TestPanicInHandlerIsRecovered(t *testing.T) {
 	require.Len(t, spans, 1, "expected one failed HTTP span, got %d", len(spans))
 
 	span := spans[0]
-	assert.Equal(t, codes.Error, span.Status.Code, "panic span status = %v, want Error", span.Status)
+	assert.Equal(t, codes.Error, span.Status.Code)
 
 	attrs := make(map[string]any)
 	for _, attr := range span.Attributes {
@@ -271,10 +265,8 @@ func TestPanicInHandlerIsRecovered(t *testing.T) {
 		assert.Equal(t, span.SpanContext.SpanID().String(), record["span_id"])
 	}
 
-	{
-		after := h.do(http.MethodGet, "/health", "", "")
-		assert.Equal(t, http.StatusOK, after.Code)
-	}
+	after := h.do(http.MethodGet, "/health", "", "")
+	assert.Equal(t, http.StatusOK, after.Code)
 }
 
 func TestRequestLogUsesRouteTemplateAndCarriesTraceIDs(t *testing.T) {
@@ -292,16 +284,13 @@ func TestRequestLogUsesRouteTemplateAndCarriesTraceIDs(t *testing.T) {
 	assert.Equal(t, "request handled", record["msg"])
 	assert.Equal(t, "INFO", record["level"])
 
-	assert.Equal(t, "/api/v1/trips/{tripId}", record["route"], "route = %v, want the template", record["route"])
+	assert.Equal(t, "/api/v1/trips/{tripId}", record["route"])
 
 	assert.Equal(t, "GET", record["method"])
 	assert.Equal(t, float64(200), record["status"])
 	assert.Equal(t, "trip-service", record["service"])
 
-	{
-		_, ok := record["duration_ms"]
-		assert.True(t, ok)
-	}
+	assert.Contains(t, record, "duration_ms")
 
 	spans := h.spans.GetSpans()
 	require.Len(t, spans, 1, "expected one span, got %d", len(spans))
@@ -317,7 +306,7 @@ func TestRequestLogLevelFollowsStatus(t *testing.T) {
 		func(model.CreateTripInput) (model.CreateTripResult, error) {
 			return model.CreateTripResult{}, tripdomain.ErrDriverBusy
 		},
-		func() (tripdomain.Trip, error) { return tripdomain.Trip{}, assertionError{} },
+		func() (tripdomain.Trip, error) { return tripdomain.Trip{}, assert.AnError },
 		func() (tripdomain.Trip, error) { return tripdomain.Trip{}, tripdomain.ErrTripNotFound },
 	)
 
@@ -336,10 +325,6 @@ func TestRequestLogLevelFollowsStatus(t *testing.T) {
 
 	assert.Equal(t, levelError, statusToLevel[500], "5xx must be logged at ERROR, got %q", statusToLevel[500])
 }
-
-type assertionError struct{}
-
-func (assertionError) Error() string { return "internal failure" }
 
 func TestServerSpanIsNamedAfterMethodAndRouteTemplate(t *testing.T) {
 	t.Parallel()
@@ -392,18 +377,17 @@ func TestMetricsUseRouteTemplateAndCoverRequiredInstruments(t *testing.T) {
 					routes[route.AsString()] = true
 				}
 
-				{
-					_, found := point.Attributes.Value("http.response.status_code")
-					assert.True(t, found)
-				}
+				_, found := point.Attributes.Value("http.response.status_code")
+				assert.True(t, found)
 			}
 		}
 	}
 
-	assert.True(t, instruments["http.server.request.duration"] || !instruments["http.server.active_requests"], "required instruments are missing, have %v", instruments)
+	assert.Contains(t, instruments, "http.server.request.duration")
+	assert.Contains(t, instruments, "http.server.active_requests")
 
-	assert.EqualValues(t, 1, len(routes))
-	assert.True(t, routes["/api/v1/trips/{tripId}"])
+	assert.Len(t, routes, 1)
+	assert.Contains(t, routes, "/api/v1/trips/{tripId}")
 }
 
 func decodeLogs(t *testing.T, buffer *bytes.Buffer) []map[string]any {

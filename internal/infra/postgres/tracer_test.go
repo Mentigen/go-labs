@@ -39,7 +39,7 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 	tracer.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: &pgconn.PgError{Code: "23505"}})
 
 	spans := exporter.GetSpans()
-	require.Len(t, spans, 1, "DB spans = %d, want 1", len(spans))
+	require.Len(t, spans, 1)
 	span := spans[0]
 	attrs := attribute.NewSet(span.Attributes...)
 	assertQueryAttributes(t, attrs)
@@ -54,14 +54,14 @@ func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
 			if instrument.Name != "db.client.operation.duration" {
 				continue
 			}
-			assert.Equal(t, "s", instrument.Unit, "DB duration unit = %q, want seconds", instrument.Unit)
+			assert.Equal(t, "s", instrument.Unit)
 			for _, point := range instrument.Data.(metricdata.Histogram[float64]).DataPoints {
 				assertQueryAttributes(t, point.Attributes)
 				count += point.Count
 			}
 		}
 	}
-	assert.Equal(t, uint64(1), count, "DB operations recorded = %d, want 1", count)
+	assert.Equal(t, uint64(1), count)
 }
 
 func assertQueryAttributes(t *testing.T, attrs attribute.Set) {

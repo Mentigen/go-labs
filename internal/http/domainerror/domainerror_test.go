@@ -52,12 +52,10 @@ func TestProblem(t *testing.T) {
 			assert.Equal(t, test.wantStatus, status)
 			assert.Equal(t, test.wantStatus, int(body.Status))
 
-			assert.Equal(t, test.wantCode, body.Code, "code = %q, want %q", body.Code, test.wantCode)
+			assert.Equal(t, test.wantCode, body.Code)
 
-			{
-				want := "https://tripgo.example/problems/" + test.wantType
-				assert.Equal(t, want, body.Type)
-			}
+			want := "https://tripgo.example/problems/" + test.wantType
+			assert.Equal(t, want, body.Type)
 
 			assert.NotEqual(t, "", body.Title)
 			require.NotNil(t, body.Detail)
@@ -101,12 +99,9 @@ func TestWriteSetsHeadersInstanceAndLogsServerErrorsOnce(t *testing.T) {
 
 	domainerror.Write(recorder, request, logger, errors.New("database exploded"))
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 
-	{
-		got := recorder.Header().Get("Content-Type")
-		assert.Equal(t, "application/problem+json", got)
-	}
+	assert.Equal(t, "application/problem+json", recorder.Header().Get("Content-Type"))
 
 	var body generated.Problem
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
@@ -116,10 +111,7 @@ func TestWriteSetsHeadersInstanceAndLogsServerErrorsOnce(t *testing.T) {
 
 	assert.NotContains(t, recorder.Body.String(), "database exploded", "response leaks the internal error: %s", recorder.Body.String())
 
-	{
-		got := strings.Count(logs.String(), "database exploded")
-		assert.EqualValues(t, 1, got)
-	}
+	assert.EqualValues(t, 1, strings.Count(logs.String(), "database exploded"))
 }
 
 func TestWriteDoesNotLogClientErrors(t *testing.T) {
@@ -133,7 +125,7 @@ func TestWriteDoesNotLogClientErrors(t *testing.T) {
 
 	domainerror.Write(recorder, request, logger, trip.ErrTripNotFound)
 
-	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 
 	assert.Equal(t, 0, logs.Len(), "client errors must not be logged by the mapper: %s", logs.String())
 }

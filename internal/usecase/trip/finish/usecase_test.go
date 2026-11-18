@@ -40,8 +40,7 @@ func newFixture(t *testing.T) *fixture {
 		Do(gomock.Any(), gomock.Any()).
 		DoAndReturn(func(ctx context.Context, fn func(context.Context) error) error {
 			return fn(ctx)
-		}).
-		AnyTimes()
+		})
 
 	f := &fixture{
 		logger:     NewMocklogger(ctrl),
@@ -71,39 +70,61 @@ func TestExecute(t *testing.T) {
 	completed.FinishedAt = &now
 	completed.UpdatedAt = now
 	tests := []struct {
-		name                          string
-		stored                        tripdomain.Trip
-		getErr, finishErr, historyErr error
-		want                          tripdomain.Trip
-		wantErr                       error
+		name    string
+		setup   func(*fixture)
+		want    tripdomain.Trip
+		wantErr error
 	}{
-		{name: "finished", stored: activeTrip(), want: completed},
-		{name: "already completed", stored: completed, wantErr: tripdomain.ErrTripCompleted},
-		{name: "not found", getErr: tripdomain.ErrTripNotFound, wantErr: tripdomain.ErrTripNotFound},
-		{name: "lost race", stored: activeTrip(), finishErr: tripdomain.ErrTripCompleted, wantErr: tripdomain.ErrTripCompleted},
-		{name: "history failure", stored: activeTrip(), historyErr: errStorage, wantErr: errStorage},
+		{
+			name: "finish active trip",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(nil)
+				f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(nil)
+				f.metrics.EXPECT().TripCompleted(gomock.Any())
+				f.logger.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", tripID.String())
+			},
+			want: completed,
+		},
+		{
+			name: "already completed",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(completed, nil)
+			},
+			wantErr: tripdomain.ErrTripCompleted,
+		},
+		{
+			name: "trip not found",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tripdomain.Trip{}, tripdomain.ErrTripNotFound)
+			},
+			wantErr: tripdomain.ErrTripNotFound,
+		},
+		{
+			name: "another request finished the trip first",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(tripdomain.ErrTripCompleted)
+			},
+			wantErr: tripdomain.ErrTripCompleted,
+		},
+		{
+			name: "cannot save history",
+			setup: func(f *fixture) {
+				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(nil)
+				f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(errStorage)
+			},
+			wantErr: errStorage,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			f := newFixture(t)
-			f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tt.stored, tt.getErr)
-			if tt.getErr == nil && tt.stored.Status == tripdomain.StatusActive {
-				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(tt.finishErr)
-				if tt.finishErr == nil {
-					f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(tt.historyErr)
-				}
-			}
-			if tt.wantErr == nil {
-				f.metrics.EXPECT().TripCompleted(gomock.Any())
-				f.logger.EXPECT().InfoContext(gomock.Any(), "trip completed", "trip_id", tripID.String())
-			}
+			tt.setup(f)
+
 			got, err := f.usecase.Execute(context.Background(), tripID)
-			if tt.wantErr != nil {
-				require.ErrorIs(t, err, tt.wantErr)
-			} else {
-				require.NoError(t, err)
-			}
+			require.ErrorIs(t, err, tt.wantErr)
 			assert.Equal(t, tt.want, got)
 		})
 	}

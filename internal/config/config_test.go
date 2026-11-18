@@ -44,9 +44,9 @@ func TestLoadReadsTelemetrySettings(t *testing.T) {
 	setValidEnvironment(t)
 
 	cfg, err := config.Load()
-	require.NoError(t, err, "unexpected error: %v", err)
+	require.NoError(t, err)
 
-	assert.Equal(t, slog.LevelDebug, cfg.LogLevel, "log level = %v, want debug", cfg.LogLevel)
+	assert.Equal(t, slog.LevelDebug, cfg.LogLevel)
 
 	want := config.TelemetryConfig{
 		ServiceName: config.DefaultServiceName,
@@ -54,7 +54,7 @@ func TestLoadReadsTelemetrySettings(t *testing.T) {
 		Protocol:    config.ProtocolHTTP,
 	}
 
-	assert.Equal(t, want, cfg.Telemetry, "telemetry = %+v, want %+v", cfg.Telemetry, want)
+	assert.Equal(t, want, cfg.Telemetry)
 }
 
 func TestLoadFailsFast(t *testing.T) {

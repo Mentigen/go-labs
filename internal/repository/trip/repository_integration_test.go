@@ -88,10 +88,8 @@ func newTrip(t *testing.T) tripdomain.Trip {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
-		{
-			_, err := pool.Exec(ctx, `DELETE FROM trips WHERE id = $1`, created.ID)
-			assert.NoError(t, err)
-		}
+		_, err := pool.Exec(ctx, `DELETE FROM trips WHERE id = $1`, created.ID)
+		assert.NoError(t, err)
 	})
 
 	return created
@@ -190,15 +188,10 @@ func TestTransactionCommitsBothTables(t *testing.T) {
 	})
 	require.NoError(t, err, "transaction: %v", err)
 
-	{
-		got := historyRows(t, stored.ID)
-		assert.EqualValues(t, 1, got)
-	}
+	assert.EqualValues(t, 1, historyRows(t, stored.ID))
 
-	{
-		_, err := e.repository.GetByID(ctx, stored.ID)
-		assert.NoError(t, err)
-	}
+	_, err = e.repository.GetByID(ctx, stored.ID)
+	assert.NoError(t, err)
 }
 
 func TestTransactionRollsBackBothTablesOnError(t *testing.T) {
@@ -219,15 +212,10 @@ func TestTransactionRollsBackBothTablesOnError(t *testing.T) {
 	})
 	require.Error(t, err, "expected the transaction to fail on the history row with an unknown trip")
 
-	{
-		_, err := e.repository.GetByID(ctx, stored.ID)
-		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
-	}
+	_, err = e.repository.GetByID(ctx, stored.ID)
+	assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 
-	{
-		got := historyRows(t, stored.ID)
-		assert.EqualValues(t, 0, got)
-	}
+	assert.EqualValues(t, 0, historyRows(t, stored.ID))
 }
 
 func TestTransactionRollsBackOnPanic(t *testing.T) {
@@ -247,10 +235,8 @@ func TestTransactionRollsBackOnPanic(t *testing.T) {
 		})
 	}()
 
-	{
-		_, err := e.repository.GetByID(ctx, stored.ID)
-		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
-	}
+	_, err := e.repository.GetByID(ctx, stored.ID)
+	assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 }
 
 func TestIdempotencyKeyLifecycle(t *testing.T) {
@@ -282,10 +268,9 @@ func TestIdempotencyKeyLifecycle(t *testing.T) {
 	assert.NoError(t, err)
 	assert.False(t, claimed)
 
-	{
-		_, found, _ := e.repository.GetIdempotencyKey(ctx, key, -time.Hour)
-		assert.False(t, found)
-	}
+	_, found, err = e.repository.GetIdempotencyKey(ctx, key, -time.Hour)
+	require.NoError(t, err)
+	assert.False(t, found)
 
 	claimed, err = e.repository.ClaimIdempotencyKey(ctx, key, "hash-3", stored.ID, -time.Hour)
 	assert.NoError(t, err)
@@ -405,10 +390,8 @@ func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	err := e.txManager.Do(ctx, func(ctx context.Context) error {
-		{
-			_, ok := ctx.Deadline()
-			assert.True(t, ok)
-		}
+		_, ok := ctx.Deadline()
+		assert.True(t, ok)
 		if err := e.repository.Save(ctx, stored); err != nil {
 			return err
 		}
@@ -419,9 +402,7 @@ func TestTransactionCanceledBeforeCommitDoesNotPersistWrites(t *testing.T) {
 		return nil
 	})
 	require.ErrorIs(t, err, context.Canceled, "commit error = %v, want context.Canceled", err)
-	{
-		_, err := e.repository.GetByID(context.Background(), stored.ID)
-		assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
-	}
+	_, err = e.repository.GetByID(context.Background(), stored.ID)
+	assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
 	assert.EqualValues(t, 0, historyRows(t, stored.ID))
 }

@@ -1,43 +1,60 @@
 package get_test
 
 import (
-	"context"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
 	tripdomain "github.com/Mentigen/go-labs/internal/domain/trip"
 	"github.com/Mentigen/go-labs/internal/usecase/trip/get"
 )
 
-var tripID = uuid.MustParse("11111111-1111-1111-1111-111111111111")
+func TestGetTrip(t *testing.T) {
+	id := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	activeTrip := tripdomain.Trip{ID: id, Status: tripdomain.StatusActive}
 
-func TestExecute(t *testing.T) {
-	t.Parallel()
 	tests := []struct {
 		name    string
+		setup   func(*MocktripRepository)
 		want    tripdomain.Trip
-		wantErr error
+		wantErr assert.ErrorAssertionFunc
 	}{
-		{name: "found", want: tripdomain.Trip{ID: tripID, Status: tripdomain.StatusActive}},
-		{name: "not found", wantErr: tripdomain.ErrTripNotFound},
-		{name: "storage failure", wantErr: errors.New("storage unavailable")},
+		{
+			name: "trip found",
+			setup: func(repo *MocktripRepository) {
+				repo.EXPECT().GetByID(gomock.Any(), id).Return(activeTrip, nil)
+			},
+			want:    activeTrip,
+			wantErr: assert.NoError,
+		},
+		{
+			name: "trip not found",
+			setup: func(repo *MocktripRepository) {
+				repo.EXPECT().GetByID(gomock.Any(), id).Return(tripdomain.Trip{}, tripdomain.ErrTripNotFound)
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...any) bool {
+				return assert.ErrorIs(t, err, tripdomain.ErrTripNotFound)
+			},
+		},
+		{
+			name: "repository unavailable",
+			setup: func(repo *MocktripRepository) {
+				repo.EXPECT().GetByID(gomock.Any(), id).Return(tripdomain.Trip{}, assert.AnError)
+			},
+			wantErr: func(t assert.TestingT, err error, _ ...any) bool {
+				return assert.ErrorIs(t, err, assert.AnError)
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			repository := NewMocktripRepository(gomock.NewController(t))
-			repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tt.want, tt.wantErr)
-			got, err := get.New(repository).Execute(context.Background(), tripID)
-			if tt.wantErr != nil {
-				require.ErrorIs(t, err, tt.wantErr)
-			} else {
-				require.NoError(t, err)
-			}
+			repo := NewMocktripRepository(gomock.NewController(t))
+			tt.setup(repo)
+
+			got, err := get.New(repo).Execute(t.Context(), id)
+			tt.wantErr(t, err)
 			assert.Equal(t, tt.want, got)
 		})
 	}

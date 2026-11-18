@@ -34,13 +34,13 @@ func TestNew(t *testing.T) {
 	t.Parallel()
 
 	created, err := trip.New(tripID, now, validParams())
-	require.NoError(t, err, "unexpected error: %v", err)
+	require.NoError(t, err)
 
 	assert.Equal(t, tripID, created.ID)
 	assert.Equal(t, userID, created.UserID)
 	assert.Equal(t, driverID, created.DriverID)
 
-	assert.Equal(t, trip.StatusActive, created.Status, "status = %q, want %q", created.Status, trip.StatusActive)
+	assert.Equal(t, trip.StatusActive, created.Status)
 
 	assert.Nil(t, created.FinishedAt, "finished_at = %v, want nil", created.FinishedAt)
 
@@ -77,9 +77,9 @@ func TestNewValidation(t *testing.T) {
 			_, err := trip.New(tripID, now, params)
 
 			var validationError *trip.ValidationError
-			require.ErrorAs(t, err, &validationError, "error = %v, want *ValidationError", err)
+			require.ErrorAs(t, err, &validationError)
 
-			assert.Equal(t, test.wantField, validationError.Field, "field = %q, want %q", validationError.Field, test.wantField)
+			assert.Equal(t, test.wantField, validationError.Field)
 		})
 	}
 }
@@ -92,10 +92,8 @@ func TestNewBoundaryValuesAreValid(t *testing.T) {
 	params.EndPoint = trip.Coordinates{Latitude: 90, Longitude: 180}
 	params.Price = 0
 
-	{
-		_, err := trip.New(tripID, now, params)
-		require.NoError(t, err)
-	}
+	_, err := trip.New(tripID, now, params)
+	require.NoError(t, err)
 }
 
 func TestFinish(t *testing.T) {
@@ -132,7 +130,7 @@ func TestFinish(t *testing.T) {
 				require.NoError(t, err)
 			}
 
-			assert.Equal(t, trip.StatusCompleted, current.Status, "status = %q, want %q", current.Status, trip.StatusCompleted)
+			assert.Equal(t, trip.StatusCompleted, current.Status)
 
 			require.NotNil(t, current.FinishedAt)
 			assert.True(t, current.FinishedAt.Equal(test.wantAt))
@@ -147,8 +145,5 @@ func TestValidationErrorMessage(t *testing.T) {
 
 	err := trip.NewValidationError("price", "must not be negative")
 
-	{
-		got, want := err.Error(), "invalid price: must not be negative"
-		assert.Equal(t, want, got)
-	}
+	assert.EqualError(t, err, "invalid price: must not be negative")
 }

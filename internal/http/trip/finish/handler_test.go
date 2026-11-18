@@ -40,62 +40,38 @@ func serve(t *testing.T, result tripdomain.Trip, err error) *httptest.ResponseRe
 func TestHandleReturnsTrip(t *testing.T) {
 	t.Parallel()
 
-	recorder := serve(t, tripdomain.Trip{ID: tripID, Status: tripdomain.StatusActive, Price: 700}, nil)
+	recorder := serve(t, tripdomain.Trip{ID: tripID, Status: tripdomain.StatusCompleted, Price: 700}, nil)
 
-	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code)
 
 	var body generated.Trip
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
 
+	assert.Equal(t, generated.Completed, body.Status)
 	assert.Equal(t, tripID, body.Id)
 	assert.EqualValues(t, 700, body.Price)
 }
 
-func TestHandleTripNotFound(t *testing.T) {
-	t.Parallel()
-
-	recorder := serve(t, tripdomain.Trip{}, tripdomain.ErrTripNotFound)
-
-	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
-
-	var problem generated.Problem
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
-
-	assert.Equal(t, "trip_not_found", problem.Code, "code = %q, want trip_not_found", problem.Code)
-}
-
-func TestHandleHidesInternalErrorDetails(t *testing.T) {
-	t.Parallel()
-
-	recorder := serve(t, tripdomain.Trip{}, errors.New("pq: password authentication failed for user tripgo"))
-
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
-
-	assert.NotContains(t, recorder.Body.String(), "password")
-	assert.NotContains(t, recorder.Body.String(), "tripgo\"")
-}
-
-func TestHandleTripAlreadyCompleted(t *testing.T) {
-	t.Parallel()
-
-	recorder := serve(t, tripdomain.Trip{}, tripdomain.ErrTripCompleted)
-
-	require.Equal(t, http.StatusConflict, recorder.Code, "status = %d, want 409", recorder.Code)
-
-	var problem generated.Problem
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
-
-	assert.Equal(t, "trip_completed", problem.Code, "code = %q, want trip_completed", problem.Code)
-}
-
-func TestHandleHidesRepositoryErrorDetails(t *testing.T) {
-	t.Parallel()
-
-	recorder := serve(t, tripdomain.Trip{}, errors.New("ERROR: deadlock detected SQLSTATE 40P01 host=10.0.0.5"))
-
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
-
-	for _, leaked := range []string{"deadlock", "SQLSTATE", "10.0.0.5"} {
-		assert.NotContains(t, recorder.Body.String(), leaked, "response leaks %q: %s", leaked, recorder.Body.String())
+func TestHandleErrors(t *testing.T) {
+	storageError := errors.New("deadlock on private database host")
+	tests := []struct {
+		name   string
+		err    error
+		status int
+		code   string
+	}{
+		{"missing trip", tripdomain.ErrTripNotFound, http.StatusNotFound, "trip_not_found"},
+		{"already completed", tripdomain.ErrTripCompleted, http.StatusConflict, "trip_completed"},
+		{"storage failure", storageError, http.StatusInternalServerError, "internal_error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := serve(t, tripdomain.Trip{}, tt.err)
+			require.Equal(t, tt.status, rec.Code)
+			var problem generated.Problem
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &problem))
+			assert.Equal(t, tt.code, problem.Code)
+			assert.NotContains(t, rec.Body.String(), "private database host")
+		})
 	}
 }

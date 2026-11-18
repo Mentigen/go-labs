@@ -76,53 +76,37 @@ func createdTrip() tripdomain.Trip {
 	}
 }
 
-func TestHandleCreatesTrip(t *testing.T) {
-	t.Parallel()
-
-	handler, usecase := newHandler(t)
-
-	usecase.EXPECT().
-		Execute(gomock.Any(), gomock.Cond(func(input model.CreateTripInput) bool {
-			return input.UserID == userID && input.DriverID == driverID && input.Price == 500 &&
-				input.StartPoint.Latitude == 55.75 && input.EndPoint.Longitude == 37.7 &&
-				input.IdempotencyKey == nil
-		})).
-		Return(model.CreateTripResult{Trip: createdTrip(), Created: true}, nil)
-
-	recorder := serve(handler, validBody, generated.CreateTripParams{})
-
-	require.Equal(t, http.StatusCreated, recorder.Code, "status = %d, want 201: %s", recorder.Code, recorder.Body.String())
-
-	{
-		got, want := recorder.Header().Get("Location"), "/api/v1/trips/"+tripID.String()
-		assert.Equal(t, want, got)
+func TestHandleCreateAndReplay(t *testing.T) {
+	responseTrip := createdTrip()
+	tests := []struct {
+		name     string
+		key      *uuid.UUID
+		created  bool
+		status   int
+		location string
+	}{
+		{"create", nil, true, http.StatusCreated, "/api/v1/trips/" + tripID.String()},
+		{"replay", &key, false, http.StatusOK, ""},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			handler, usecase := newHandler(t)
+			input := model.CreateTripInput{
+				UserID: userID, DriverID: driverID, Price: 500,
+				StartPoint:     tripdomain.Coordinates{Latitude: 55.75, Longitude: 37.61},
+				EndPoint:       tripdomain.Coordinates{Latitude: 55.8, Longitude: 37.7},
+				IdempotencyKey: tt.key,
+			}
+			usecase.EXPECT().Execute(gomock.Any(), input).Return(model.CreateTripResult{Trip: responseTrip, Created: tt.created}, nil)
 
-	var body generated.Trip
-	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
-
-	assert.Equal(t, tripID, body.Id)
-	assert.Equal(t, generated.TripStatus(tripdomain.StatusActive), body.Status)
-}
-
-func TestHandlePassesIdempotencyKeyAndAnswers200OnReplay(t *testing.T) {
-	t.Parallel()
-
-	handler, usecase := newHandler(t)
-
-	usecase.EXPECT().
-		Execute(gomock.Any(), gomock.Cond(func(input model.CreateTripInput) bool {
-			return input.IdempotencyKey != nil && *input.IdempotencyKey == key
-		})).
-		Return(model.CreateTripResult{Trip: createdTrip(), Created: false}, nil)
-
-	recorder := serve(handler, validBody, generated.CreateTripParams{IdempotencyKey: &key})
-
-	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
-
-	{
-		location := recorder.Header().Get("Location")
-		assert.Equal(t, "", location)
+			rec := serve(handler, validBody, generated.CreateTripParams{IdempotencyKey: tt.key})
+			require.Equal(t, tt.status, rec.Code)
+			assert.Equal(t, tt.location, rec.Header().Get("Location"))
+			var body generated.Trip
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
+			assert.Equal(t, tripID, body.Id)
+			assert.Equal(t, generated.Active, body.Status)
+		})
 	}
 }
 
@@ -150,12 +134,9 @@ func TestHandleMapsUsecaseErrors(t *testing.T) {
 
 			recorder := serve(handler, validBody, generated.CreateTripParams{})
 
-			require.Equal(t, test.wantStatus, recorder.Code, "status = %d, want %d", recorder.Code, test.wantStatus)
+			require.Equal(t, test.wantStatus, recorder.Code)
 
-			{
-				problem := decodeProblem(t, recorder)
-				assert.Equal(t, test.wantCode, problem.Code)
-			}
+			assert.Equal(t, test.wantCode, decodeProblem(t, recorder).Code)
 		})
 	}
 }
@@ -176,17 +157,11 @@ func TestHandleRejectsMalformedBody(t *testing.T) {
 
 			recorder := serve(handler, body, generated.CreateTripParams{})
 
-			require.Equal(t, http.StatusBadRequest, recorder.Code, "status = %d, want 400", recorder.Code)
+			require.Equal(t, http.StatusBadRequest, recorder.Code)
 
-			{
-				got := recorder.Header().Get("Content-Type")
-				assert.Equal(t, "application/problem+json", got)
-			}
+			assert.Equal(t, "application/problem+json", recorder.Header().Get("Content-Type"))
 
-			{
-				problem := decodeProblem(t, recorder)
-				assert.Equal(t, "invalid_request", problem.Code)
-			}
+			assert.Equal(t, "invalid_request", decodeProblem(t, recorder).Code)
 		})
 	}
 }
@@ -202,14 +177,11 @@ func TestHandleHidesRepositoryErrorDetails(t *testing.T) {
 
 	recorder := serve(handler, validBody, generated.CreateTripParams{})
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 
 	for _, leaked := range []string{"hunter2", "10.0.0.5", "SQLSTATE", "connection"} {
 		assert.NotContains(t, recorder.Body.String(), leaked, "response leaks %q: %s", leaked, recorder.Body.String())
 	}
 
-	{
-		problem := decodeProblem(t, recorder)
-		assert.Equal(t, "internal_error", problem.Code)
-	}
+	assert.Equal(t, "internal_error", decodeProblem(t, recorder).Code)
 }

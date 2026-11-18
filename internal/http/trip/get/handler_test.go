@@ -42,7 +42,7 @@ func TestHandleReturnsTrip(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{ID: tripID, Status: tripdomain.StatusActive, Price: 700}, nil)
 
-	require.Equal(t, http.StatusOK, recorder.Code, "status = %d, want 200", recorder.Code)
+	require.Equal(t, http.StatusOK, recorder.Code)
 
 	var body generated.Trip
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &body))
@@ -56,12 +56,12 @@ func TestHandleTripNotFound(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{}, tripdomain.ErrTripNotFound)
 
-	require.Equal(t, http.StatusNotFound, recorder.Code, "status = %d, want 404", recorder.Code)
+	require.Equal(t, http.StatusNotFound, recorder.Code)
 
 	var problem generated.Problem
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &problem))
 
-	assert.Equal(t, "trip_not_found", problem.Code, "code = %q, want trip_not_found", problem.Code)
+	assert.Equal(t, "trip_not_found", problem.Code)
 }
 
 func TestHandleHidesInternalErrorDetails(t *testing.T) {
@@ -69,7 +69,7 @@ func TestHandleHidesInternalErrorDetails(t *testing.T) {
 
 	recorder := serve(t, tripdomain.Trip{}, errors.New("pq: password authentication failed for user tripgo"))
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, "status = %d, want 500", recorder.Code)
+	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 
 	assert.NotContains(t, recorder.Body.String(), "password")
 	assert.NotContains(t, recorder.Body.String(), "tripgo\"")
