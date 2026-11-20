@@ -23,7 +23,7 @@ func (r *Repository) Save(ctx context.Context, trip tripdomain.Trip) error {
 			trip.StartPoint.Latitude, trip.StartPoint.Longitude,
 			trip.EndPoint.Latitude, trip.EndPoint.Longitude,
 			trip.Price, string(trip.Status),
-			trip.StartedAt, trip.FinishedAt,
+			trip.StartedAt, trip.FinishedAt, trip.LastPositionAt,
 			trip.CreatedAt, trip.UpdatedAt,
 		).
 		PlaceholderFormat(squirrel.Dollar).

@@ -13,7 +13,7 @@ var tripColumns = []string{
 	"start_latitude", "start_longitude",
 	"end_latitude", "end_longitude",
 	"price", columnStatus,
-	"started_at", "finished_at",
+	"started_at", "finished_at", "last_position_at",
 	"created_at", "updated_at",
 }
 
@@ -25,7 +25,7 @@ func scanTrip(row pgx.Row) (tripdomain.Trip, error) {
 		&trip.StartPoint.Latitude, &trip.StartPoint.Longitude,
 		&trip.EndPoint.Latitude, &trip.EndPoint.Longitude,
 		&trip.Price, &trip.Status,
-		&trip.StartedAt, &trip.FinishedAt,
+		&trip.StartedAt, &trip.FinishedAt, &trip.LastPositionAt,
 		&trip.CreatedAt, &trip.UpdatedAt,
 	)
 

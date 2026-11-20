@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Mentigen/go-labs/internal/config"
+	"github.com/Mentigen/go-labs/internal/gateway/push"
 	httpserver "github.com/Mentigen/go-labs/internal/http"
 	"github.com/Mentigen/go-labs/internal/http/health"
+	"github.com/Mentigen/go-labs/internal/http/position"
 	createhandler "github.com/Mentigen/go-labs/internal/http/trip/create"
 	finishhandler "github.com/Mentigen/go-labs/internal/http/trip/finish"
 	gethandler "github.com/Mentigen/go-labs/internal/http/trip/get"
@@ -26,6 +28,7 @@ import (
 	createusecase "github.com/Mentigen/go-labs/internal/usecase/trip/create"
 	finishusecase "github.com/Mentigen/go-labs/internal/usecase/trip/finish"
 	getusecase "github.com/Mentigen/go-labs/internal/usecase/trip/get"
+	"github.com/Mentigen/go-labs/internal/worker/positions"
 )
 
 const transactionTracerName = "github.com/Mentigen/go-labs/internal/infra/postgres/transaction"
@@ -36,6 +39,8 @@ type Container struct {
 
 	pool      *pgxpool.Pool
 	telemetry *telemetry.Telemetry
+	positions *positions.Pool
+	push      *push.Gateway
 }
 
 func New(ctx context.Context, cfg config.Config) (*Container, error) {
@@ -52,21 +57,39 @@ func New(ctx context.Context, cfg config.Config) (*Container, error) {
 		return nil, err
 	}
 
-	server, err := newServer(cfg, logger, pool, otel)
+	repository := triprepository.New(pool, cfg.Database.QueryTimeout)
+	txManager := transaction.NewManager(pool, otel.TracerProvider.Tracer(transactionTracerName), cfg.Database.QueryTimeout)
+	worker, gateway, handler, err := newPositions(cfg.Positions, logger, repository, txManager, otel)
 	if err != nil {
+		_ = otel.Shutdown(ctx)
+		pool.Close()
+		return nil, err
+	}
+	server, err := newServer(cfg, logger, pool, repository, txManager, otel, handler)
+	if err != nil {
+		gateway.Close()
 		_ = otel.Shutdown(ctx)
 		pool.Close()
 
 		return nil, err
 	}
 
-	return &Container{Logger: logger, Server: server, pool: pool, telemetry: otel}, nil
+	worker.Start(context.WithoutCancel(ctx))
+	return &Container{Logger: logger, Server: server, pool: pool, telemetry: otel, positions: worker, push: gateway}, nil
 }
 
 func (c *Container) Shutdown(ctx context.Context) error {
 	if err := c.Server.Shutdown(ctx); err != nil {
+		c.positions.Abort()
+		_ = c.Server.Close()
+		c.push.Close()
 		return fmt.Errorf("wait for in-flight requests: %w", err)
 	}
+	if err := c.positions.Stop(ctx); err != nil {
+		c.push.Close()
+		return fmt.Errorf("drain position workers: %w", err)
+	}
+	c.push.Close()
 
 	c.flushTelemetry(ctx)
 
@@ -130,11 +153,11 @@ func newServer(
 	cfg config.Config,
 	logger *slog.Logger,
 	pool *pgxpool.Pool,
+	repository *triprepository.Repository,
+	txManager *transaction.Manager,
 	otel *telemetry.Telemetry,
+	positionHandler *position.Handler,
 ) (*http.Server, error) {
-	repository := triprepository.New(pool, cfg.Database.QueryTimeout)
-	txManager := transaction.NewManager(pool, otel.TracerProvider.Tracer(transactionTracerName), cfg.Database.QueryTimeout)
-
 	tripMetrics, err := telemetry.NewTripMetrics(otel.MeterProvider)
 	if err != nil {
 		return nil, fmt.Errorf("create trip metrics: %w", err)
@@ -153,10 +176,11 @@ func newServer(
 
 	router, err := httpserver.NewRouter(httpserver.Options{
 		Handlers: httpserver.Handlers{
-			Create: createhandler.New(createUsecase, logger),
-			Get:    gethandler.New(getUsecase, logger),
-			Finish: finishhandler.New(finishUsecase, logger),
-			Health: health.New(pool, cfg.Database.QueryTimeout),
+			Create:    createhandler.New(createUsecase, logger),
+			Get:       gethandler.New(getUsecase, logger),
+			Finish:    finishhandler.New(finishUsecase, logger),
+			Health:    health.New(pool, cfg.Database.QueryTimeout),
+			Positions: positionHandler,
 		},
 		Logger:         logger,
 		TracerProvider: otel.TracerProvider,

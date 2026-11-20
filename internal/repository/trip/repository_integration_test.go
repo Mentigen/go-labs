@@ -48,8 +48,8 @@ func runTests(m *testing.M) int {
 
 	var migrated bool
 
-	if err := pool.QueryRow(ctx, `SELECT to_regclass('public.trips') IS NOT NULL`).Scan(&migrated); err != nil || !migrated {
-		os.Stderr.WriteString("table trips not found: run `make migrate`\n")
+	if err := pool.QueryRow(ctx, `SELECT to_regclass('trip_positions') IS NOT NULL`).Scan(&migrated); err != nil || !migrated {
+		os.Stderr.WriteString("table trip_positions not found: run `make migrate`\n")
 		return 1
 	}
 

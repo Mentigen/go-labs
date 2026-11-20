@@ -13,15 +13,26 @@ import (
 )
 
 func (r *Repository) GetByID(ctx context.Context, tripID uuid.UUID) (tripdomain.Trip, error) {
+	return r.getByID(ctx, tripID, false)
+}
+
+func (r *Repository) GetByIDForUpdate(ctx context.Context, tripID uuid.UUID) (tripdomain.Trip, error) {
+	return r.getByID(ctx, tripID, true)
+}
+
+func (r *Repository) getByID(ctx context.Context, tripID uuid.UUID, lock bool) (tripdomain.Trip, error) {
 	ctx, cancel := r.withTimeout(ctx)
 	defer cancel()
 
-	query, args, err := squirrel.
+	builder := squirrel.
 		Select(tripColumns...).
 		From("trips").
 		Where(squirrel.Eq{"id": tripID}).
-		PlaceholderFormat(squirrel.Dollar).
-		ToSql()
+		PlaceholderFormat(squirrel.Dollar)
+	if lock {
+		builder = builder.Suffix("FOR UPDATE")
+	}
+	query, args, err := builder.ToSql()
 	if err != nil {
 		return tripdomain.Trip{}, fmt.Errorf("build get trip query: %w", err)
 	}

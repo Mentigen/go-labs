@@ -24,47 +24,38 @@ func decode(t *testing.T, buffer *bytes.Buffer) map[string]any {
 	return record
 }
 
-func TestLoggerAddsTraceIdentifiersInsideSpan(t *testing.T) {
-	t.Parallel()
-
-	var buffer bytes.Buffer
-
-	logger := telemetry.NewLogger(&buffer, slog.LevelInfo, "trip-service")
-	provider := sdktrace.NewTracerProvider()
-
-	ctx, span := provider.Tracer("test").Start(context.Background(), "operation")
+func TestLoggerTraceFields(t *testing.T) {
+	ctx, span := sdktrace.NewTracerProvider().Tracer("test").Start(t.Context(), "operation")
 	defer span.End()
-
-	logger.InfoContext(ctx, "inside span")
-
-	record := decode(t, &buffer)
-
-	assert.Equal(t, span.SpanContext().TraceID().String(), record["trace_id"])
-
-	assert.Equal(t, span.SpanContext().SpanID().String(), record["span_id"])
-}
-
-func TestLoggerWritesRequiredFieldsWithoutSpan(t *testing.T) {
-	t.Parallel()
-
-	var buffer bytes.Buffer
-
-	logger := telemetry.NewLogger(&buffer, slog.LevelInfo, "trip-service")
-
-	logger.With("component", "test").InfoContext(context.Background(), "outside span")
-
-	record := decode(t, &buffer)
-
-	for _, field := range []string{"time", "level", "msg", "service"} {
-		assert.Contains(t, record, field)
+	tests := []struct {
+		name            string
+		ctx             context.Context
+		traceID, spanID string
+	}{
+		{name: "outside span", ctx: t.Context()},
+		{
+			name: "inside span", ctx: ctx,
+			traceID: span.SpanContext().TraceID().String(),
+			spanID:  span.SpanContext().SpanID().String(),
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			logger := telemetry.NewLogger(&buffer, slog.LevelInfo, "trip-service")
 
-	assert.Equal(t, "trip-service", record["service"])
-	assert.Equal(t, "test", record["component"])
+			logger.With("component", "test").InfoContext(tt.ctx, "trip completed")
 
-	assert.NotContains(t, record, "trace_id")
-
-	assert.True(t, strings.HasSuffix(record["time"].(string), "Z"))
+			record := decode(t, &buffer)
+			assert.Equal(t, tt.traceID, record["trace_id"])
+			assert.Equal(t, tt.spanID, record["span_id"])
+			assert.Equal(t, "trip-service", record["service"])
+			assert.Equal(t, "test", record["component"])
+			assert.Equal(t, "INFO", record["level"])
+			assert.Equal(t, "trip completed", record["msg"])
+			assert.True(t, strings.HasSuffix(record["time"].(string), "Z"))
+		})
+	}
 }
 
 func TestLoggerHonoursLevel(t *testing.T) {

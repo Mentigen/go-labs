@@ -23,7 +23,8 @@ func FromTrip(source trip.Trip) generated.Trip {
 		Price:  source.Price,
 		Status: generated.TripStatus(source.Status),
 
-		StartedAt:  source.StartedAt,
-		FinishedAt: source.FinishedAt,
+		StartedAt:      source.StartedAt,
+		FinishedAt:     source.FinishedAt,
+		LastPositionAt: source.LastPositionAt,
 	}
 }

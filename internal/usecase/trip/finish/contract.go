@@ -16,7 +16,7 @@ type (
 	}
 
 	tripRepository interface {
-		GetByID(ctx context.Context, tripID uuid.UUID) (tripdomain.Trip, error)
+		GetByIDForUpdate(ctx context.Context, tripID uuid.UUID) (tripdomain.Trip, error)
 		Finish(ctx context.Context, trip tripdomain.Trip) error
 		AddCompletedHistory(ctx context.Context, tripID uuid.UUID) error
 	}

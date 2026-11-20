@@ -29,12 +29,11 @@ type traceHandler struct {
 }
 
 func (h traceHandler) Handle(ctx context.Context, record slog.Record) error {
-	if spanContext := trace.SpanContextFromContext(ctx); spanContext.IsValid() {
-		record.AddAttrs(
-			slog.String("trace_id", spanContext.TraceID().String()),
-			slog.String("span_id", spanContext.SpanID().String()),
-		)
+	var traceID, spanID string
+	if sc := trace.SpanContextFromContext(ctx); sc.IsValid() {
+		traceID, spanID = sc.TraceID().String(), sc.SpanID().String()
 	}
+	record.AddAttrs(slog.String("trace_id", traceID), slog.String("span_id", spanID))
 
 	return h.Handler.Handle(ctx, record)
 }

@@ -28,6 +28,7 @@ type Config struct {
 	ShutdownTimeout time.Duration
 	Database        DatabaseConfig
 	Telemetry       TelemetryConfig
+	Positions       PositionsConfig
 }
 
 type TelemetryConfig struct {
@@ -76,6 +77,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	positions, err := loadPositions()
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		HTTPAddr:        httpAddr,
 		HTTPTimeouts:    httpTimeouts,
@@ -83,6 +89,7 @@ func Load() (Config, error) {
 		ShutdownTimeout: shutdownTimeout,
 		Database:        database,
 		Telemetry:       telemetry,
+		Positions:       positions,
 	}, nil
 }
 

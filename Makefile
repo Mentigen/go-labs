@@ -4,6 +4,7 @@ COVER_PROFILE := coverage.out
 COVER_PACKAGES := ./internal/usecase/... ./internal/domain/...
 
 generate:
+	go tool oapi-codegen --config push-codegen.yaml contracts/openapi/push-service.openapi.yaml
 	go tool oapi-codegen --config oapi-codegen.yaml contracts/openapi/trip-service.openapi.yaml
 	go generate ./...
 

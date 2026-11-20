@@ -14,16 +14,18 @@ import (
 	"github.com/Mentigen/go-labs/internal/http/domainerror"
 	"github.com/Mentigen/go-labs/internal/http/health"
 	"github.com/Mentigen/go-labs/internal/http/middleware"
+	"github.com/Mentigen/go-labs/internal/http/position"
 	"github.com/Mentigen/go-labs/internal/http/trip/create"
 	"github.com/Mentigen/go-labs/internal/http/trip/finish"
 	"github.com/Mentigen/go-labs/internal/http/trip/get"
 )
 
 type Handlers struct {
-	Create *create.Handler
-	Get    *get.Handler
-	Finish *finish.Handler
-	Health *health.Handler
+	Create    *create.Handler
+	Get       *get.Handler
+	Finish    *finish.Handler
+	Health    *health.Handler
+	Positions *position.Handler
 }
 
 type Options struct {
@@ -48,6 +50,14 @@ func (a api) GetTrip(w http.ResponseWriter, r *http.Request, tripID generated.Tr
 
 func (a api) FinishTrip(w http.ResponseWriter, r *http.Request, tripID generated.TripId) {
 	a.handlers.Finish.Handle(w, r, tripID)
+}
+
+func (a api) CreateTripPosition(w http.ResponseWriter, r *http.Request, id generated.TripId) {
+	a.handlers.Positions.Save(w, r, id)
+}
+
+func (a api) ListTripPositions(w http.ResponseWriter, r *http.Request, id generated.TripId) {
+	a.handlers.Positions.List(w, r, id)
 }
 
 func (a api) Health(w http.ResponseWriter, r *http.Request) {

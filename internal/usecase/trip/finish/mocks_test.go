@@ -111,19 +111,19 @@ func (mr *MocktripRepositoryMockRecorder) Finish(ctx, arg1 any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Finish", reflect.TypeOf((*MocktripRepository)(nil).Finish), ctx, arg1)
 }
 
-// GetByID mocks base method.
-func (m *MocktripRepository) GetByID(ctx context.Context, tripID uuid.UUID) (trip.Trip, error) {
+// GetByIDForUpdate mocks base method.
+func (m *MocktripRepository) GetByIDForUpdate(ctx context.Context, tripID uuid.UUID) (trip.Trip, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetByID", ctx, tripID)
+	ret := m.ctrl.Call(m, "GetByIDForUpdate", ctx, tripID)
 	ret0, _ := ret[0].(trip.Trip)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
-// GetByID indicates an expected call of GetByID.
-func (mr *MocktripRepositoryMockRecorder) GetByID(ctx, tripID any) *gomock.Call {
+// GetByIDForUpdate indicates an expected call of GetByIDForUpdate.
+func (mr *MocktripRepositoryMockRecorder) GetByIDForUpdate(ctx, tripID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByID", reflect.TypeOf((*MocktripRepository)(nil).GetByID), ctx, tripID)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByIDForUpdate", reflect.TypeOf((*MocktripRepository)(nil).GetByIDForUpdate), ctx, tripID)
 }
 
 // MocktxManager is a mock of txManager interface.

@@ -78,7 +78,7 @@ func TestExecute(t *testing.T) {
 		{
 			name: "finish active trip",
 			setup: func(f *fixture) {
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().GetByIDForUpdate(gomock.Any(), tripID).Return(activeTrip(), nil)
 				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(nil)
 				f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(nil)
 				f.metrics.EXPECT().TripCompleted(gomock.Any())
@@ -89,21 +89,21 @@ func TestExecute(t *testing.T) {
 		{
 			name: "already completed",
 			setup: func(f *fixture) {
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(completed, nil)
+				f.repository.EXPECT().GetByIDForUpdate(gomock.Any(), tripID).Return(completed, nil)
 			},
 			wantErr: tripdomain.ErrTripCompleted,
 		},
 		{
 			name: "trip not found",
 			setup: func(f *fixture) {
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(tripdomain.Trip{}, tripdomain.ErrTripNotFound)
+				f.repository.EXPECT().GetByIDForUpdate(gomock.Any(), tripID).Return(tripdomain.Trip{}, tripdomain.ErrTripNotFound)
 			},
 			wantErr: tripdomain.ErrTripNotFound,
 		},
 		{
 			name: "another request finished the trip first",
 			setup: func(f *fixture) {
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().GetByIDForUpdate(gomock.Any(), tripID).Return(activeTrip(), nil)
 				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(tripdomain.ErrTripCompleted)
 			},
 			wantErr: tripdomain.ErrTripCompleted,
@@ -111,7 +111,7 @@ func TestExecute(t *testing.T) {
 		{
 			name: "cannot save history",
 			setup: func(f *fixture) {
-				f.repository.EXPECT().GetByID(gomock.Any(), tripID).Return(activeTrip(), nil)
+				f.repository.EXPECT().GetByIDForUpdate(gomock.Any(), tripID).Return(activeTrip(), nil)
 				f.repository.EXPECT().Finish(gomock.Any(), completed).Return(nil)
 				f.repository.EXPECT().AddCompletedHistory(gomock.Any(), tripID).Return(errStorage)
 			},

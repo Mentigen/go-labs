@@ -23,6 +23,13 @@ func setValidEnvironment(t *testing.T) {
 	t.Helper()
 
 	for name, value := range map[string]string{
+		envPushURL:                   "http://localhost:8090",
+		envCheckInterval:             "",
+		envStaleAfter:                "",
+		envPositionWorkers:           "",
+		envQueueSize:                 "",
+		envBatchSize:                 "",
+		envPushTimeout:               "",
 		"HTTP_ADDR":                  ":8080",
 		envLogLevel:                  "debug",
 		envShutdownTimeout:           "10s",

@@ -37,7 +37,7 @@ func (u *Usecase) Execute(ctx context.Context, tripID uuid.UUID) (tripdomain.Tri
 	var finished tripdomain.Trip
 
 	err := u.txManager.Do(ctx, func(ctx context.Context) error {
-		trip, err := u.repository.GetByID(ctx, tripID)
+		trip, err := u.repository.GetByIDForUpdate(ctx, tripID)
 		if err != nil {
 			return err
 		}
