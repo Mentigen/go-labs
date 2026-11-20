@@ -1,0 +1,4 @@
+package: pushapi
+generate:
+  models: true
+output: internal/generated/push/api.gen.go

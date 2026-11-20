@@ -1,37 +1,29 @@
 package model
 
 import (
-	"time"
-
 	"github.com/google/uuid"
+
+	"github.com/Mentigen/go-labs/internal/domain/trip"
 )
 
-type TripStatus string
-
-const (
-	TripStatusActive    TripStatus = "active"
-	TripStatusCompleted TripStatus = "completed"
-)
-
-type Coordinates struct {
-	Latitude  float64
-	Longitude float64
-}
-
-type Trip struct {
-	ID       uuid.UUID
+type CreateTripInput struct {
 	UserID   uuid.UUID
 	DriverID uuid.UUID
 
-	StartPoint Coordinates
-	EndPoint   Coordinates
+	StartPoint trip.Coordinates
+	EndPoint   trip.Coordinates
 
-	Price  int64
-	Status TripStatus
+	Price int64
 
-	StartedAt  time.Time
-	FinishedAt *time.Time
+	IdempotencyKey *uuid.UUID
+}
 
-	CreatedAt time.Time
-	UpdatedAt time.Time
+type CreateTripResult struct {
+	Trip    trip.Trip
+	Created bool
+}
+
+type IdempotencyRecord struct {
+	RequestHash string
+	TripID      uuid.UUID
 }

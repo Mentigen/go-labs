@@ -1,0 +1,78 @@
+package postgres_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
+	"github.com/Mentigen/go-labs/internal/infra/postgres"
+)
+
+func TestQueryFailureRecordsSQLStateBeforeEndingSpan(t *testing.T) {
+	t.Parallel()
+
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+	reader := sdkmetric.NewManualReader()
+	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
+	t.Cleanup(func() {
+		_ = tp.Shutdown(context.Background())
+		_ = mp.Shutdown(context.Background())
+	})
+
+	tracer, err := postgres.NewQueryTracer(tp, mp)
+	require.NoError(t, err)
+
+	ctx, parent := tp.Tracer("test").Start(context.Background(), "request")
+	defer parent.End()
+	ctx = tracer.TraceQueryStart(ctx, nil, pgx.TraceQueryStartData{SQL: "INSERT INTO trips (id) VALUES ($1)"})
+	tracer.TraceQueryEnd(ctx, nil, pgx.TraceQueryEndData{Err: &pgconn.PgError{Code: "23505"}})
+
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+	span := spans[0]
+	attrs := attribute.NewSet(span.Attributes...)
+	assertQueryAttributes(t, attrs)
+	assert.Equal(t, codes.Error, span.Status.Code)
+	assert.True(t, span.Parent.Equal(parent.SpanContext()))
+
+	var metrics metricdata.ResourceMetrics
+	require.NoError(t, reader.Collect(context.Background(), &metrics))
+	var count uint64
+	for _, scope := range metrics.ScopeMetrics {
+		for _, instrument := range scope.Metrics {
+			if instrument.Name != "db.client.operation.duration" {
+				continue
+			}
+			assert.Equal(t, "s", instrument.Unit)
+			for _, point := range instrument.Data.(metricdata.Histogram[float64]).DataPoints {
+				assertQueryAttributes(t, point.Attributes)
+				count += point.Count
+			}
+		}
+	}
+	assert.Equal(t, uint64(1), count)
+}
+
+func assertQueryAttributes(t *testing.T, attrs attribute.Set) {
+	t.Helper()
+	for key, want := range map[attribute.Key]string{
+		"db.operation.name":  "INSERT",
+		"db.collection.name": "trips",
+		"error.type":         "23505",
+	} {
+		value, ok := attrs.Value(key)
+		assert.True(t, ok)
+		assert.Equal(t, want, value.AsString())
+	}
+}
